@@ -1,0 +1,11 @@
+{
+  "appId": "com.ailearn.local",
+  "appName": "AI闯关学习",
+  "webDir": "../app",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowBackup": false
+  }
+}

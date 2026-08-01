@@ -1,1 +1,122 @@
-# AI-CardLearning
+# AI 闯关学习 · 本地开源版
+
+一个本地优先的 AI 闯关学习应用：上传学习资料，AI 自动生成知识卡片，通过“每日闯关 + 错题重排 + 间隔复习”完成学习闭环。
+
+## 特性
+
+- 完全离线可用：数据保存在本机 IndexedDB，不依赖服务器，不需要账号登录
+- 打开即用：没有注册、密码、验证码流程
+- AI 生成卡片：支持 DeepSeek / OpenAI / Kimi / 通义 / 智谱 / 硅基流动等 OpenAI 兼容接口，用户自带 API Key
+- 科学学习机制：每日新卡 + 错题重练 + 三次答错标记重点复习 + 1/2/4/7/15 天间隔复习
+- 闯关路径：新学关与复习关组成的可视化学习路径
+- 导入导出：`.zip` 备份可存网盘、云盘或直接发给他人，API Key 不会进入备份文件
+- 双端界面：手机端保留原移动 UI；桌面端使用专业仪表盘布局（侧边栏、总览、统计与路径）
+- PWA：可安装到 Chrome/Edge，断网后仍可打开使用
+
+## 截图
+
+![桌面端首页](docs/screenshots/desktop-home.png)
+
+![桌面端学习区](docs/screenshots/desktop-zone.png)
+
+![手机端首页](docs/screenshots/mobile-home.png)
+
+![手机端答题](docs/screenshots/mobile-answer.png)
+
+## 快速开始
+
+```bash
+python serve.py
+```
+
+浏览器打开 `http://127.0.0.1:8765` 即可使用。
+
+也可以：
+
+```bash
+npm run serve
+```
+
+## 下载安装包
+
+正式安装包通过 GitHub Releases 发布：
+
+- Windows：`AI闯关学习-Setup-x.x.x.exe` / 便携版 `.zip`
+- Android：`app-debug.apk` 或正式签名 APK
+
+下载后安装即可直接使用，不需要服务器、账号或额外配置。详细步骤见 [安装与卸载说明](docs/安装与卸载说明.md)。
+
+## 测试
+
+```bash
+npm test
+node tests/e2e-smoke.js
+node tests/e2e-verify.js
+```
+
+单元测试覆盖学习区、每日队列、答题判定、错题、复习排期、关卡排版、批量操作、导入导出与设置加密；浏览器端到端测试覆盖手机/桌面布局、离线可用、备份导出和示例备份导入。
+
+## 目录结构
+
+```text
+app/                        # 本地版主应用（PWA）
+  index.html
+  manifest.webmanifest
+  sw.js
+  css/style.css
+  js/
+    local/                  # 本地数据层、核心业务、AI、PDF、导入导出
+    api.js                  # 本地 API 路由
+    zones.js / cards.js / settings.js / app.js
+  vendor/                   # 本地内置 pdf.js 与 JSZip
+desktop/                    # Electron 桌面壳
+android/                    # Capacitor Android 配置
+docs/                       # 用户说明、构建指南、数据格式
+samples/                    # 示例学习区备份
+tests/                      # 单元测试与浏览器端到端测试
+scripts/                    # 示例备份生成脚本
+backend/ frontend/          # 旧服务器版，暂保留
+```
+
+## 使用流程
+
+1. 首页点击“新建学习区”
+2. 学习区内上传 `txt / md / cpp / h / py / pdf` 文件
+3. 进入“AI 趋势分析”，确认知识点后生成卡片
+4. 点击关卡节点开始闯关，答对移出队列，答错回到队尾并重新打乱
+5. 在“错题集”集中复习，或把错题加入今日练习
+6. 在“设置”中配置 AI 服务商，并定期“导出完整备份”
+
+详细说明见 [用户使用说明](docs/用户使用说明.md)。
+
+AI 联网、国内直连与代理配置见 [AI 联网与代理说明](docs/AI联网与代理说明.md)。
+
+## 构建
+
+- PWA：直接把 `app/` 放到任意静态服务器即可
+- Windows 桌面版：见 [开发者构建指南](docs/开发者构建指南.md)
+- Android APK：见 [Android 构建说明](android/README.md)
+
+## 数据与隐私
+
+- 所有学习数据只保存在当前设备
+- 删除学习区/卡片/文件即永久清空
+- API Key 只保存在本机，并且默认不会出现在导出备份中
+- 建议定期导出 `.zip` 备份，可存到网盘或本地目录
+
+## 实施进度
+
+按照 [00-实施指南-本地开源版.md](00-实施指南-本地开源版.md)：
+
+- [x] 阶段 A：本地数据层、AI 直连、PDF、无登录
+- [x] 阶段 B：导入导出、冲突处理、API Key 隔离
+- [x] 阶段 C：PWA、离线可用、备份提醒
+- [x] 阶段 D：Electron 脚手架与原生文件对话框
+- [x] 阶段 E：Capacitor 配置与构建说明
+- [x] 阶段 F：README、文档、示例、GitHub Actions、MIT 许可
+
+Windows 安装包与 Android APK 的实际产出需要在 GitHub Actions 或本机安装依赖后构建。
+
+## License
+
+[MIT](LICENSE)

@@ -1,0 +1,40 @@
+# AI 联网与代理说明
+
+## 必须联网的部分
+
+以下功能需要网络连接，并且需要你在“设置 → AI 服务商”里配置自己的 API Key：
+
+- 上传资料后的“AI 趋势分析”
+- 生成知识卡片
+- 获取模型列表
+- 测试 AI 连接
+
+离线时这些 AI 按钮会提示网络或 API 配置问题，但以下功能完全离线可用：
+
+- 新建/管理学习区
+- 导入、导出 `.zip` 备份
+- 每日闯关、答题、错题集、复习排期、打卡
+- 查看已生成的全部知识卡片
+
+## 国内直连
+
+内置服务商模板默认在国内可直接使用：
+
+- DeepSeek：`https://api.deepseek.com`
+- 通义千问：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Kimi：`https://api.moonshot.cn/v1`
+- 智谱 GLM：`https://open.bigmodel.cn/api/paas/v4`
+- 硅基流动：`https://api.siliconflow.cn/v1`
+
+## 科学上网 / 自定义网关
+
+如果使用 OpenAI 官方或需要走代理的接口：
+
+1. 在“设置 → AI 服务商”点击“+ 添加”
+2. 选择“自定义”模板
+3. “接口地址”填你的 OpenAI 兼容网关地址，例如：
+   - `https://api.openai.com/v1`
+   - 你自己的代理网关 `https://你的域名/v1`
+4. 填入 API Key，保存并启动
+
+应用会原样把请求发到该地址，因此无论你通过什么网络访问，只要填写的网关可用，AI 就能直接使用。

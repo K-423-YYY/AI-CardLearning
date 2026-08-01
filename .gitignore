@@ -1,0 +1,29 @@
+# Env / secrets
+backend/.env
+.env
+*.pem
+
+# Data
+backend/data/
+*.db
+*.sqlite
+backend/venv/
+__pycache__/
+.pytest_cache/
+
+# Node
+node_modules/
+desktop/node_modules/
+android/node_modules/
+
+# Build output
+desktop/dist/
+android/android/
+release/
+dist/
+
+# Logs / temp
+*.log
+.server-8765*
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pyjwt
+python-dotenv
+openai
+cryptography
+pypdf
+python-multipart
+pytest
+httpx
