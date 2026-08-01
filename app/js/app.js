@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.3';
+const APP_VERSION = '0.1.4';
 
 const Utils = {
   esc(str) {
@@ -169,6 +169,7 @@ const App = {
       if (providerId) target = { route: 'settings', args: [providerId] };
     }
     this.navigate(target.route, ...target.args);
+    this.checkForUpdates();
 
     window.addEventListener('hashchange', () => {
       const h = location.hash.replace('#', '');
@@ -205,6 +206,61 @@ const App = {
     if (settingsBtn) {
       settingsBtn.addEventListener('click', () => this.navigate('settings'));
     }
+  },
+
+  compareVersions(a, b) {
+    const pa = String(a).split('.').map(Number);
+    const pb = String(b).split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] || 0;
+      const y = pb[i] || 0;
+      if (x !== y) return x - y;
+    }
+    return 0;
+  },
+
+  async checkForUpdates() {
+    if (this._updateChecked) return;
+    this._updateChecked = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch('https://api.github.com/repos/K-423-YYY/AI-CardLearning/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) return;
+      const data = await res.json();
+      const latest = String(data.tag_name || '').replace(/^v/i, '');
+      if (!latest) return;
+      if (this.compareVersions(latest, APP_VERSION.replace(/^v/i, '')) > 0) {
+        this.showUpdateModal(data);
+      }
+    } catch (err) {
+      // 离线或网络异常时静默跳过
+    }
+  },
+
+  showUpdateModal(data) {
+    const modal = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    box.innerHTML = `
+      <h3>发现新版本</h3>
+      <p style="font-size:0.9rem;color:#334155;margin-bottom:10px;">
+        最新版本：<b>${Utils.esc(data.tag_name || '')}</b>
+      </p>
+      <p style="font-size:0.85rem;color:#64748b;margin-bottom:16px;">
+        直接下载并安装新版即可，学习数据会自动保留，不要先卸载旧版。
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-outline btn-sm" id="modal-cancel">稍后再说</button>
+        <a class="btn btn-primary btn-sm" id="modal-download" href="${Utils.esc(data.html_url || 'https://github.com/K-423-YYY/AI-CardLearning/releases')}" target="_blank" rel="noopener">前往下载</a>
+      </div>
+    `;
+    modal.classList.remove('hidden');
+    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
+    modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
   }
 };
 

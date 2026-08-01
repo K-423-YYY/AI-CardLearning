@@ -41,10 +41,15 @@ npm run serve
 
 正式安装包通过 GitHub Releases 发布：
 
-- Windows：`AI闯关学习-Setup-x.x.x.exe` / 便携版 `.zip`
-- Android：`app-debug.apk` 或正式签名 APK
+下载页面：https://github.com/K-423-YYY/AI-CardLearning/releases
 
-下载后安装即可直接使用，不需要服务器、账号或额外配置。详细步骤见 [安装与卸载说明](docs/安装与卸载说明.md)。
+请按以下说明选择文件安装：
+
+- Windows 电脑（推荐）：下载并安装 **`AI.Setup.0.1.4.exe`**
+- Windows 免安装版：下载 **`AI.0.1.4.exe`** 或 **`AI.exe`**，解压/保存后双击打开
+- Android 手机：下载并安装 **`app-debug.apk`**
+
+安装后直接打开即可使用，不需要服务器、账号或额外配置。更新时直接下载新版安装包并覆盖安装即可，学习数据会自动保留，不要先卸载旧版。详细步骤见 [安装与卸载说明](docs/安装与卸载说明.md)。
 
 ## 测试
 
