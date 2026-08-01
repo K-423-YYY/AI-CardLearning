@@ -283,6 +283,21 @@ const Zones = {
     }
   },
 
+  async speedTierLabelForFileIds(zoneId, fileIds) {
+    try {
+      const [settings, zone] = await Promise.all([
+        API.get('/api/settings'),
+        API.get(`/api/zones/${zoneId}`)
+      ]);
+      const files = (zone.files || []).filter((f) => fileIds.includes(f.id));
+      const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+      const profile = LocalAIInstance.resolveSpeedProfile(settings, totalBytes);
+      return profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+    } catch (e) {
+      return '普通';
+    }
+  },
+
   async handleAiAnalyze(zoneId) {
     const chat = document.getElementById('ai-chat');
     const resultEl = document.getElementById('ai-result');
@@ -299,7 +314,8 @@ const Zones = {
     regenerateBtn.disabled = true;
     resultEl.classList.add('hidden');
     resultEl.innerHTML = '';
-    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在按当前加速档位分析选中的文件并整理知识区块，请稍候...</div>';
+    const tierLabel = await this.speedTierLabelForFileIds(zoneId, fileIds);
+    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位分析选中的文件并整理知识区块，请稍候...</div>`;
     if (progressWrap) progressWrap.classList.remove('hidden');
 
     try {
@@ -365,7 +381,9 @@ const Zones = {
     const progressWrap = document.getElementById('ai-gen-progress');
     confirmBtn.disabled = true;
     confirmBtn.textContent = '生成中...';
-    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在按知识模块生成卡片，每一条知识点一张卡片...</div>';
+    const fileIds = Array.from(new Set((this.aiPoints || []).map((p) => p.file_id).filter(Boolean)));
+    const tierLabel = await this.speedTierLabelForFileIds(zoneId, fileIds);
+    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位生成卡片，每一条知识点一张卡片...</div>`;
     if (progressWrap) progressWrap.classList.remove('hidden');
     const groups = {};
     this.aiPoints.forEach(p => {

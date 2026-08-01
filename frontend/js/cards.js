@@ -155,11 +155,13 @@ const Cards = {
     const card = this.cards[index];
     const labelMap = { '必考': 'label-bikao', '常考': 'label-changkao', '加分': 'label-jiafen' };
     const labelClass = labelMap[card.label] || 'label-changkao';
+    const reviewLabel = card.review_mode === 'wrong' ? '错题强化' : card.review_mode === 'correct' ? '间隔复习' : '新学';
     const letters = ['A', 'B', 'C', 'D'];
 
     const quizEl = document.getElementById('card-quiz');
     quizEl.innerHTML = `
       <div class="card-quiz">
+        <span class="quiz-mode">${reviewLabel}</span>
         <span class="quiz-label ${labelClass}">${Utils.esc(card.label)}</span>
         <h4 style="font-size:0.8rem;color:#94a3b8;margin-bottom:4px;">${Utils.esc(card.title)}</h4>
         <div class="quiz-question">${Utils.esc(card.question)}</div>
@@ -253,33 +255,41 @@ const Cards = {
   },
 
   async renderDone(data) {
-    document.getElementById('learn-progress').innerHTML = '';
-    document.getElementById('card-quiz').innerHTML = '';
     const done = document.getElementById('learn-done');
-    done.classList.remove('hidden');
     const backBtn = document.getElementById('btn-back-home-done');
     const nextBtn = document.getElementById('btn-next-level');
     nextBtn.classList.add('hidden');
-    backBtn.textContent = '返回路径';
-    backBtn.onclick = () => this.refreshProgressAndNavigate('zone', this.currentZoneId);
 
     if (this.mode === 'wrong') {
+      document.getElementById('learn-progress').innerHTML = '';
+      document.getElementById('card-quiz').innerHTML = '';
+      done.classList.remove('hidden');
       document.getElementById('done-title').textContent = this.totalCount === 0 ? '暂无错题' : '错题复习完成！';
       document.getElementById('done-msg').textContent = this.totalCount === 0
         ? '先去闯关积累错题，再回来复习吧~'
         : '本次错题已全部练完，继续保持！';
+      backBtn.textContent = '返回路径';
+      backBtn.onclick = () => this.refreshProgressAndNavigate('zone', this.currentZoneId);
       return;
     }
 
     let progress = this.progress;
-    try {
-      progress = await API.get(`/api/zones/${this.currentZoneId}/progress`);
-      this.progress = progress;
-    } catch (e) {
-      // progress is optional
+    if (this.mode !== 'replay') {
+      try {
+        progress = await API.get(`/api/zones/${this.currentZoneId}/progress`);
+        this.progress = progress;
+      } catch (e) {
+        // progress is optional
+      }
     }
 
     const hasMore = (progress && progress.levels || []).some(lv => lv.status === '待闯关');
+    document.getElementById('learn-progress').innerHTML = '';
+    document.getElementById('card-quiz').innerHTML = '';
+    done.classList.remove('hidden');
+    backBtn.textContent = '返回路径';
+    backBtn.onclick = () => this.refreshProgressAndNavigate('zone', this.currentZoneId);
+
     if (this.mode === 'replay') {
       document.getElementById('done-title').textContent = '本关练习完成！';
       document.getElementById('done-msg').textContent = '随时可以回到路径继续闯关';

@@ -37,10 +37,10 @@
   ];
 
   function resolveSpeedProfile(settings, totalBytes) {
-    const mb = 1024 * 1024;
-    const t2 = Math.max(0.1, Number((settings && settings.speed_tier2_mb) || 1)) * mb;
-    const t3 = Math.max(t2 + 0.1, Number((settings && settings.speed_tier3_mb) || 5)) * mb;
-    const t4 = Math.max(t3 + 0.1, Number((settings && settings.speed_tier4_mb) || 20)) * mb;
+    const fallback = (mb, bytes) => bytes || (mb || 1) * 1024 * 1024;
+    const t2 = Math.max(1, Number(fallback(settings && settings.speed_tier2_mb, settings && settings.speed_tier2_bytes)) || 1024 * 1024);
+    const t3 = Math.max(t2 + 1, Number(fallback(settings && settings.speed_tier3_mb, settings && settings.speed_tier3_bytes)) || 5 * 1024 * 1024);
+    const t4 = Math.max(t3 + 1, Number(fallback(settings && settings.speed_tier4_mb, settings && settings.speed_tier4_bytes)) || 20 * 1024 * 1024);
     let profile = SPEED_PROFILES[0];
     if (totalBytes >= t4) profile = SPEED_PROFILES[3];
     else if (totalBytes >= t3) profile = SPEED_PROFILES[2];
@@ -501,7 +501,7 @@
       }
     }
 
-    return { analyzeZone, generateCards, listModels, testConnection, AIError };
+    return { analyzeZone, generateCards, listModels, testConnection, resolveSpeedProfile, AIError };
   }
 
   return { create, AIError };

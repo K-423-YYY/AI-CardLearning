@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS cards (
     sort_order INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT '待学',
     wrong_count INTEGER NOT NULL DEFAULT 0,
+    review_stage INTEGER NOT NULL DEFAULT 0,
+    correct_streak INTEGER NOT NULL DEFAULT 0,
+    lapse_count INTEGER NOT NULL DEFAULT 0,
+    last_review_at TEXT,
+    last_wrong_at TEXT,
+    last_correct_at TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -142,6 +148,7 @@ CREATE TABLE IF NOT EXISTS daily_tasks (
     position INTEGER NOT NULL DEFAULT 0,
     level_no INTEGER,
     mode TEXT NOT NULL DEFAULT 'daily',
+    review_mode TEXT NOT NULL DEFAULT 'new',
     created_at TEXT NOT NULL
 );
 

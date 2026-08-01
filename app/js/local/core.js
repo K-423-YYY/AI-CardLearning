@@ -20,6 +20,7 @@
   const MODE_REPLAY = 'replay';
   const MODE_WRONG = 'wrong';
   const REVIEW_INTERVALS = [1, 2, 4, 7, 15];
+  const MEMORY_REVIEW_INTERVALS = [1, 2, 4, 7, 15, 30];
   const REVIEW_CLUSTER_TARGET = 15;
   const REVIEW_CLUSTER_MAX_GAP = 3;
   const DEFAULT_DAILY_LIMIT = 5;
@@ -537,6 +538,38 @@
       return unique(rows.map((r) => r.card_id));
     }
 
+    function reviewModeForCard(card) {
+      const lastWrong = String(card.last_wrong_at || '');
+      const lastCorrect = String(card.last_correct_at || '');
+      if (card.status === STATUS_REVIEW) return 'wrong';
+      if (lastWrong && (!lastCorrect || lastWrong > lastCorrect)) return 'wrong';
+      if (card.status !== STATUS_DONE && !lastCorrect) return 'new';
+      return 'correct';
+    }
+
+    async function recentWrongIds(zoneId) {
+      const cards = await cardsByZone(zoneId);
+      return cards
+        .filter((card) => reviewModeForCard(card) === 'wrong')
+        .map((card) => card.id);
+    }
+
+    function interleaveIds(groups) {
+      const seen = new Set();
+      const result = [];
+      const maxLen = Math.max(0, ...groups.map((group) => group.length));
+      for (let i = 0; i < maxLen; i++) {
+        groups.forEach((group) => {
+          const id = group[i];
+          if (id !== undefined && !seen.has(id)) {
+            seen.add(id);
+            result.push(id);
+          }
+        });
+      }
+      return result;
+    }
+
     async function firstActionableLevel(zoneId, dateStr) {
       const due = await dueReviewIds(zoneId, dateStr);
       const levels = await levelRows(zoneId);
@@ -549,12 +582,16 @@
     }
 
     async function scheduleReviews(zoneId, cardId, dateStr, now) {
+      const card = await db.get('cards', cardId);
       const rows = await db.where(
         'review_schedule',
         (r) => r.zone_id === zoneId && r.card_id === cardId && r.status === 'pending'
       );
       for (const row of rows) await db.delete('review_schedule', row.id);
-      for (const interval of REVIEW_INTERVALS) {
+      const intervals = (card && card.review_stage >= 4)
+        ? MEMORY_REVIEW_INTERVALS
+        : REVIEW_INTERVALS;
+      for (const interval of intervals) {
         await db.put('review_schedule', {
           id: `r:1:${cardId}:${dateAdd(dateStr, interval)}`,
           user_id: 1,
@@ -688,8 +725,11 @@
       if (current.level_type === LEVEL_TYPE_NEW) {
         newIds = await pendingNewIds(zoneId, current.level_no);
       }
-      const reviewIds = await dueReviewIds(zoneId, dateStr);
-      const queueIds = unique([...shuffle(newIds), ...reviewIds]);
+      const dueIds = await dueReviewIds(zoneId, dateStr);
+      const wrongIds = (await recentWrongIds(zoneId)).filter((id) => !dueIds.includes(id));
+      const dueSet = new Set(dueIds);
+      const wrongSet = new Set(wrongIds);
+      const queueIds = interleaveIds([shuffle(newIds), shuffle(wrongIds), shuffle(dueIds)]);
       if (!queueIds.length) return existing;
       const tasks = await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr);
       const maxPos = tasks.reduce((m, t) => Math.max(m, t.position || 0), 0);
@@ -703,6 +743,7 @@
           position: maxPos + i + 1,
           level_no: current.level_no,
           mode: MODE_DAILY,
+          review_mode: wrongSet.has(queueIds[i]) ? 'wrong' : (dueSet.has(queueIds[i]) ? 'correct' : 'new'),
           created_at: now
         });
       }
@@ -819,6 +860,9 @@
         speed_tier2_mb: s.speed_tier2_mb || 1,
         speed_tier3_mb: s.speed_tier3_mb || 5,
         speed_tier4_mb: s.speed_tier4_mb || 20,
+        speed_tier2_bytes: s.speed_tier2_bytes || (s.speed_tier2_mb || 1) * 1024 * 1024,
+        speed_tier3_bytes: s.speed_tier3_bytes || (s.speed_tier3_mb || 5) * 1024 * 1024,
+        speed_tier4_bytes: s.speed_tier4_bytes || (s.speed_tier4_mb || 20) * 1024 * 1024,
         providers: Object.entries(AI_PROVIDERS).map(([id, preset]) => ({
           id,
           name: preset.name,
@@ -850,6 +894,9 @@
       if (body.speed_tier2_mb !== undefined) s.speed_tier2_mb = Number(body.speed_tier2_mb) || 1;
       if (body.speed_tier3_mb !== undefined) s.speed_tier3_mb = Number(body.speed_tier3_mb) || 5;
       if (body.speed_tier4_mb !== undefined) s.speed_tier4_mb = Number(body.speed_tier4_mb) || 20;
+      if (body.speed_tier2_bytes !== undefined) s.speed_tier2_bytes = Number(body.speed_tier2_bytes) || 1024 * 1024;
+      if (body.speed_tier3_bytes !== undefined) s.speed_tier3_bytes = Number(body.speed_tier3_bytes) || 5 * 1024 * 1024;
+      if (body.speed_tier4_bytes !== undefined) s.speed_tier4_bytes = Number(body.speed_tier4_bytes) || 20 * 1024 * 1024;
       await db.put('settings', { id: 'profile', ...profile });
       await db.put('settings', { id: 'user_settings', ...s });
       await ensureDefaultProvider();
@@ -1077,6 +1124,12 @@
         sort_order: sortOrder || 0,
         status: STATUS_TODO,
         wrong_count: 0,
+        review_stage: 0,
+        correct_streak: 0,
+        lapse_count: 0,
+        last_review_at: null,
+        last_wrong_at: null,
+        last_correct_at: null,
         level_no: null,
         created_at: nowStr()
       });
@@ -1199,6 +1252,12 @@
             sort_order: oldCard.sort_order || 0,
             status: preserveProgress ? oldCard.status || STATUS_TODO : STATUS_TODO,
             wrong_count: preserveProgress ? oldCard.wrong_count || 0 : 0,
+            review_stage: preserveProgress ? oldCard.review_stage || 0 : 0,
+            correct_streak: preserveProgress ? oldCard.correct_streak || 0 : 0,
+            lapse_count: preserveProgress ? oldCard.lapse_count || 0 : 0,
+            last_review_at: preserveProgress ? oldCard.last_review_at || null : null,
+            last_wrong_at: preserveProgress ? oldCard.last_wrong_at || null : null,
+            last_correct_at: preserveProgress ? oldCard.last_correct_at || null : null,
             level_no: null,
             created_at: oldCard.created_at || nowStr()
           });
@@ -1262,6 +1321,7 @@
               position: oldTask.position || 0,
               level_no: oldTask.level_no,
               mode: oldTask.mode || MODE_DAILY,
+              review_mode: oldTask.review_mode || 'new',
               created_at: oldTask.created_at || nowStr()
             });
           }
@@ -1523,7 +1583,8 @@
             options,
             answer,
             label: card.label,
-            explanation: card.explanation
+            explanation: card.explanation,
+            review_mode: task.review_mode || reviewModeForCard(card)
           });
         }
         return {
@@ -1583,7 +1644,8 @@
             answer,
             label: card.label,
             explanation: card.explanation,
-            level_no: task.level_no
+            level_no: task.level_no,
+            review_mode: task.review_mode || reviewModeForCard(card)
           });
         }
         return {
@@ -1645,6 +1707,11 @@
         });
         if (correct) {
           if (!replay) {
+            card.review_stage = Math.min(6, (card.review_stage || 0) + 1);
+            card.correct_streak = (card.correct_streak || 0) + 1;
+            card.last_review_at = now;
+            card.last_correct_at = now;
+            await db.put('cards', card);
             if (task) {
               task.status = 'done';
               await db.put('daily_tasks', task);
@@ -1669,6 +1736,9 @@
         } else {
           if (!replay) {
             card.wrong_count = wrongCount + 1;
+            card.lapse_count = (card.lapse_count || 0) + 1;
+            card.correct_streak = 0;
+            card.last_wrong_at = now;
             await db.put('cards', card);
             if (!practice) {
               const wrongToday = (await db.where(
@@ -1810,6 +1880,7 @@
               task.position = maxPos + 1;
               task.level_no = levelNo;
               task.mode = MODE_DAILY;
+              task.review_mode = 'wrong';
               await db.put('daily_tasks', task);
             } else {
               await db.insert('daily_tasks', {
@@ -1821,6 +1892,7 @@
                 position: maxPos + 1,
                 level_no: levelNo,
                 mode: MODE_DAILY,
+                review_mode: 'wrong',
                 created_at: now
               });
             }

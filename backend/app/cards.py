@@ -86,6 +86,43 @@ def _due_review_ids(conn, user_id: int, zone_id: int, date_str: str) -> list[int
     return [row["card_id"] for row in rows]
 
 
+def _review_mode_for_card(card) -> str:
+    last_wrong = card["last_wrong_at"] or ""
+    last_correct = card["last_correct_at"] or ""
+    if card["status"] == STATUS_REVIEW:
+        return "wrong"
+    if last_wrong and (not last_correct or last_wrong > last_correct):
+        return "wrong"
+    if card["status"] != STATUS_DONE and not last_correct:
+        return "new"
+    return "correct"
+
+
+def _recent_wrong_ids(conn, zone_id: int) -> list[int]:
+    rows = conn.execute(
+        """SELECT c.id FROM cards c
+           JOIN files f ON f.id = c.file_id
+           WHERE f.zone_id = ?
+             AND (c.status = '重点复习'
+                  OR (c.last_wrong_at IS NOT NULL
+                      AND (c.last_correct_at IS NULL OR c.last_wrong_at > c.last_correct_at)))""",
+        (zone_id,),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def _interleave_ids(groups: list[list[int]]) -> list[int]:
+    seen = set()
+    result = []
+    max_len = max((len(group) for group in groups), default=0)
+    for i in range(max_len):
+        for group in groups:
+            if i < len(group) and group[i] not in seen:
+                seen.add(group[i])
+                result.append(group[i])
+    return result
+
+
 def _pending_new_ids(conn, zone_id: int, level_no: int) -> list[int]:
     card_ids = _level_role_cards(conn, zone_id, level_no, ROLE_NEW)
     if not card_ids:
@@ -122,7 +159,9 @@ def _schedule_reviews(conn, user_id: int, zone_id: int, card_id: int, date_str: 
            WHERE user_id = ? AND zone_id = ? AND card_id = ? AND status = 'pending'""",
         (user_id, zone_id, card_id),
     )
-    for interval in config.REVIEW_INTERVALS:
+    card = conn.execute("SELECT review_stage FROM cards WHERE id = ?", (card_id,)).fetchone()
+    intervals = config.REVIEW_INTERVALS + ([30] if card and (card["review_stage"] or 0) >= 4 else [])
+    for interval in intervals:
         review_date = (date.fromisoformat(date_str) + timedelta(days=interval)).isoformat()
         conn.execute(
             """INSERT OR IGNORE INTO review_schedule
@@ -286,21 +325,35 @@ def _ensure_today_tasks(conn, user_id: int, zone_id: int, date_str: str):
     new_ids = []
     if current["level_type"] == LEVEL_TYPE_NEW:
         new_ids = _pending_new_ids(conn, zone_id, current["level_no"])
-    review_ids = _due_review_ids(conn, user_id, zone_id, date_str)
+    due_ids = _due_review_ids(conn, user_id, zone_id, date_str)
+    wrong_ids = [card_id for card_id in _recent_wrong_ids(conn, zone_id) if card_id not in due_ids]
     random.shuffle(new_ids)
-    queue_ids = list(dict.fromkeys(new_ids + review_ids))
+    random.shuffle(wrong_ids)
+    random.shuffle(due_ids)
+    queue_ids = _interleave_ids([new_ids, wrong_ids, due_ids])
     if not queue_ids:
         return existing if existing else []
+    due_set = set(due_ids)
+    wrong_set = set(wrong_ids)
 
     max_pos = conn.execute(
         "SELECT COALESCE(MAX(position), 0) AS m FROM daily_tasks WHERE user_id = ? AND zone_id = ? AND task_date = ?",
         (user_id, zone_id, date_str),
     ).fetchone()["m"]
     conn.executemany(
-        """INSERT INTO daily_tasks (user_id, zone_id, card_id, task_date, status, position, level_no, mode, created_at)
-           VALUES (?, ?, ?, ?, 'pending', ?, ?, 'daily', ?)""",
+        """INSERT INTO daily_tasks (user_id, zone_id, card_id, task_date, status, position, level_no, mode, review_mode, created_at)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, 'daily', ?, ?)""",
         [
-            (user_id, zone_id, card_id, date_str, max_pos + position, current["level_no"], now)
+            (
+                user_id,
+                zone_id,
+                card_id,
+                date_str,
+                max_pos + position,
+                current["level_no"],
+                "wrong" if card_id in wrong_set else ("correct" if card_id in due_set else "new"),
+                now,
+            )
             for position, card_id in enumerate(queue_ids, start=1)
         ],
     )
@@ -361,6 +414,7 @@ def get_today(zone_id: int, user: dict = Depends(get_current_user)):
                     "answer": answer,
                     "label": card["label"],
                     "explanation": card["explanation"],
+                    "review_mode": t["review_mode"] or _review_mode_for_card(card),
                 }
             )
         return ok(
@@ -429,6 +483,7 @@ def start_level(zone_id: int, level_no: int, user: dict = Depends(get_current_us
                     "label": card["label"],
                     "explanation": card["explanation"],
                     "level_no": t["level_no"],
+                    "review_mode": t["review_mode"] if mode == MODE_DAILY else _review_mode_for_card(card),
                 }
             )
         return ok(
@@ -497,6 +552,13 @@ def submit_answer(card_id: int, body: AnswerRequest, user: dict = Depends(get_cu
             card_status = card["status"]
             if correct:
                 if not replay:
+                    conn.execute(
+                        """UPDATE cards SET review_stage = MIN(6, review_stage + 1),
+                           correct_streak = correct_streak + 1,
+                           last_review_at = ?, last_correct_at = ?
+                           WHERE id = ?""",
+                        (now, now, card_id),
+                    )
                     if task is not None:
                         conn.execute("UPDATE daily_tasks SET status = 'done' WHERE id = ?", (task["id"],))
                     if not practice:
@@ -518,7 +580,14 @@ def submit_answer(card_id: int, body: AnswerRequest, user: dict = Depends(get_cu
                 _sync_level_statuses(conn, user["id"], card["zone_id"], date_str, now)
             else:
                 if not replay:
-                    conn.execute("UPDATE cards SET wrong_count = wrong_count + 1 WHERE id = ?", (card_id,))
+                    conn.execute(
+                        """UPDATE cards SET wrong_count = wrong_count + 1,
+                           lapse_count = lapse_count + 1,
+                           correct_streak = 0,
+                           last_wrong_at = ?
+                           WHERE id = ?""",
+                        (now, card_id),
+                    )
                     if not practice:
                         wrong_today = conn.execute(
                             """SELECT COUNT(*) AS cnt FROM learning_records

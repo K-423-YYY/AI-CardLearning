@@ -23,8 +23,15 @@ test('local AI analysis filters files and card generation batches', async () => 
   const ai = LocalAI.create(core);
   const originalFetch = global.fetch;
   await core.updateSettings({ ai_api_key: 'local-test-key-123456' });
+  await core.updateSettings({
+    speed_tier2_bytes: 1024,
+    speed_tier3_bytes: 2048,
+    speed_tier4_bytes: 4096
+  });
   const providers = await core.listProviders();
   await core.updateProvider(providers.providers[0].id, { models: [{ model: 'test-model' }] });
+  const speedProfile = ai.resolveSpeedProfile(await core.getSettings(), 2048);
+  assert.strictEqual(speedProfile.multiplier, 10);
 
   global.fetch = async (url, options) => {
     const body = JSON.parse(options.body);

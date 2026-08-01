@@ -39,9 +39,7 @@ const Settings = {
       this.settings = data;
       document.getElementById('set-nickname').value = data.nickname || '';
       document.getElementById('set-daily-limit').value = data.daily_card_limit || 5;
-      document.getElementById('speed-tier2-mb').value = data.speed_tier2_mb || 1;
-      document.getElementById('speed-tier3-mb').value = data.speed_tier3_mb || 5;
-      document.getElementById('speed-tier4-mb').value = data.speed_tier4_mb || 20;
+      this.renderSpeedTiers(data);
       document.getElementById('btn-save-profile').onclick = () => this.saveProfile();
       this.renderBackupDir();
       this.renderProviderList(provData.providers || []);
@@ -738,10 +736,16 @@ const Settings = {
   },
 
   async saveSpeedTiers() {
+    const tier = (id, unitId, fallbackBytes) => {
+      const value = parseFloat(document.getElementById(id).value);
+      const unit = document.getElementById(unitId).value;
+      const bytes = (value || 0) * (unit === 'kb' ? 1024 : 1024 * 1024);
+      return bytes || fallbackBytes;
+    };
     const body = {
-      speed_tier2_mb: parseFloat(document.getElementById('speed-tier2-mb').value) || 1,
-      speed_tier3_mb: parseFloat(document.getElementById('speed-tier3-mb').value) || 5,
-      speed_tier4_mb: parseFloat(document.getElementById('speed-tier4-mb').value) || 20
+      speed_tier2_bytes: tier('speed-tier2-mb', 'speed-tier2-unit', 1024 * 1024),
+      speed_tier3_bytes: tier('speed-tier3-mb', 'speed-tier3-unit', 5 * 1024 * 1024),
+      speed_tier4_bytes: tier('speed-tier4-mb', 'speed-tier4-unit', 20 * 1024 * 1024)
     };
     try {
       await API.put('/api/settings', body);
@@ -749,6 +753,26 @@ const Settings = {
     } catch (e) {
       Toast.show(e.message, 'error');
     }
+  },
+
+  renderSpeedTiers(data) {
+    const tiers = [
+      ['speed-tier2-mb', 'speed-tier2-unit', data.speed_tier2_bytes || (data.speed_tier2_mb || 1) * 1024 * 1024],
+      ['speed-tier3-mb', 'speed-tier3-unit', data.speed_tier3_bytes || (data.speed_tier3_mb || 5) * 1024 * 1024],
+      ['speed-tier4-mb', 'speed-tier4-unit', data.speed_tier4_bytes || (data.speed_tier4_mb || 20) * 1024 * 1024]
+    ];
+    tiers.forEach(([inputId, unitId, bytes]) => {
+      const input = document.getElementById(inputId);
+      const unit = document.getElementById(unitId);
+      if (!input || !unit) return;
+      if (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0) {
+        input.value = bytes / (1024 * 1024);
+        unit.value = 'mb';
+      } else {
+        input.value = Math.max(0.1, bytes / 1024);
+        unit.value = 'kb';
+      }
+    });
   },
 
   showExportResult(filename, path) {
