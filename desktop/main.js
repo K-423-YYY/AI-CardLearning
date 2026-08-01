@@ -32,7 +32,9 @@ function createWindow() {
       nodeIntegration: false
     }
   });
-  mainWindow.loadFile(path.join(__dirname, '..', 'app', 'index.html'));
+  const packagedApp = path.join(__dirname, 'app', 'index.html');
+  const repoApp = path.join(__dirname, '..', 'app', 'index.html');
+  mainWindow.loadFile(fs.existsSync(packagedApp) ? packagedApp : repoApp);
   mainWindow.on('closed', () => {
     mainWindow = null;
   });

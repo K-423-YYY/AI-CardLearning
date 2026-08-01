@@ -734,3 +734,36 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   .btn { border-radius: 8px; }
   .btn-sm { border-radius: 8px; }
 }
+
+/* === Version tags === */
+.version-tag, .app-version {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+.app-version {
+  text-align: center;
+  margin: 18px 0 6px;
+}
+
+/* === Mobile compact learn layout === */
+@media (max-width: 767px) {
+  .learn-progress { margin-bottom: 8px; }
+  .progress-text { font-size: 0.72rem; }
+  .progress-bar-bg { height: 6px; margin: 4px 0; }
+  .card-quiz { padding: 16px; }
+  .card-quiz h4 { font-size: 0.72rem !important; margin-bottom: 4px !important; }
+  .quiz-question { font-size: 1rem; line-height: 1.55; margin-bottom: 14px; }
+  .quiz-options { gap: 8px; margin-bottom: 10px; }
+  .quiz-option { padding: 10px 12px; font-size: 0.88rem; border-radius: 10px; }
+  .quiz-result { margin-top: 10px; }
+  .btn-next.show {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 12px;
+    width: auto;
+    z-index: 60;
+    box-shadow: 0 6px 18px rgba(79, 70, 229, 0.35);
+  }
+  .page:has(.btn-next.show) .main-content { padding-bottom: 84px; }
+}

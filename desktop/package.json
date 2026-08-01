@@ -1,19 +1,17 @@
 {
   "name": "ai-learn-desktop",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI 闯关学习 Windows 桌面版外壳",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis portable"
+    "prepare:app": "powershell -NoProfile -Command \"Copy-Item -Path ../app -Destination app -Recurse -Force\"",
+    "dist": "npm run prepare:app && electron-builder --win nsis portable"
   },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
-  },
-  "optionalDependencies": {
-    "better-sqlite3": "^11.3.0"
   },
   "build": {
     "appId": "com.ailearn.local",
@@ -21,7 +19,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "../app/**/*"
+      "app/**/*"
     ],
     "directories": {
       "output": "dist"

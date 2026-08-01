@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=20">
+<link rel="stylesheet" href="./css/style.css?v=21">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -30,6 +30,7 @@
   <div class="sidebar-foot">
     <span class="local-badge">● 本地模式</span>
     <p>数据仅保存在这台设备</p>
+    <span class="version-tag" id="desktop-version"></span>
   </div>
 </aside>
 <div id="desktop-main">
@@ -171,6 +172,7 @@
         <p>还没有学习区</p>
         <p class="empty-hint">点击右上角新建，上传学习资料开始闯关</p>
       </div>
+      <div class="app-version" id="app-version"></div>
     </main>
   </div>
 </template>
@@ -393,6 +395,7 @@
         <p class="empty-hint">添加服务商后进入配置页填写 API</p>
       </div>
       <div id="settings-msg" class="toast hidden"></div>
+      <div class="app-version" id="app-version"></div>
     </main>
   </div>
 </template>
@@ -476,19 +479,19 @@
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=20"></script>
-<script src="./js/local/db.js?v=20"></script>
-<script src="./js/local/core.js?v=20"></script>
-<script src="./js/local/ai.js?v=20"></script>
-<script src="./js/local/pdf.js?v=20"></script>
-<script src="./js/local/export.js?v=20"></script>
-<script src="./js/local/import.js?v=20"></script>
-<script src="./js/api.js?v=20"></script>
-<script src="./js/auth.js?v=20"></script>
-<script src="./js/zones.js?v=20"></script>
-<script src="./js/cards.js?v=20"></script>
-<script src="./js/settings.js?v=20"></script>
-<script src="./js/app.js?v=20"></script>
+<script src="./js/local/storage.js?v=21"></script>
+<script src="./js/local/db.js?v=21"></script>
+<script src="./js/local/core.js?v=21"></script>
+<script src="./js/local/ai.js?v=21"></script>
+<script src="./js/local/pdf.js?v=21"></script>
+<script src="./js/local/export.js?v=21"></script>
+<script src="./js/local/import.js?v=21"></script>
+<script src="./js/api.js?v=21"></script>
+<script src="./js/auth.js?v=21"></script>
+<script src="./js/zones.js?v=21"></script>
+<script src="./js/cards.js?v=21"></script>
+<script src="./js/settings.js?v=21"></script>
+<script src="./js/app.js?v=21"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

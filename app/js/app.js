@@ -1,3 +1,5 @@
+const APP_VERSION = '0.1.2';
+
 const Utils = {
   esc(str) {
     if (!str) return '';
@@ -119,6 +121,14 @@ const App = {
         (r.route === 'settings' && item.dataset.nav === 'settings');
       item.classList.toggle('active', !!active);
     });
+    this.updateVersionTags();
+  },
+
+  updateVersionTags() {
+    const mobile = document.getElementById('app-version');
+    const desktop = document.getElementById('desktop-version');
+    if (mobile) mobile.textContent = '版本 ' + APP_VERSION;
+    if (desktop) desktop.textContent = '版本 ' + APP_VERSION;
   },
 
   async init() {
