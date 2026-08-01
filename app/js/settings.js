@@ -451,7 +451,7 @@ const Settings = {
     try {
       const data = await API.post(`/api/providers/${this.providerId}/test`);
       resultEl.className = 'ai-test-result show success';
-      resultEl.innerHTML = `✔ 连接成功（${data.latency}s）：${Utils.esc(data.reply || 'OK')}`;
+      resultEl.innerHTML = `✔ 连接成功（${data.latency}s）：${Utils.esc(data.reply || '正常')}`;
     } catch (e) {
       resultEl.className = 'ai-test-result show error';
       resultEl.innerHTML = `✘ ${Utils.esc(e.message)}`;

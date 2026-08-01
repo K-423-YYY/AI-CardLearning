@@ -104,16 +104,22 @@
   }
 
   function create(core) {
-    async function analyzeZone(zoneId) {
-      const config = await core.getActiveAIConfig();
-      const files = await core.getZoneSourceFiles(zoneId);
-      if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
-      const parts = files.map((f) => `文件《${f.filename}》：\n${String(f.content || '').slice(0, 60000)}`);
-      const payload = parts.join('\n\n').slice(0, 200000);
-      const data = await chatJson(config.api_key, config.base_url, config.model, [
-        { role: 'system', content: ANALYZE_SYSTEM },
-        { role: 'user', content: payload }
-      ]);
+    function splitText(text, size) {
+      const result = [];
+      let current = '';
+      String(text || '').split('\n').forEach((line) => {
+        if (current && current.length + line.length + 1 > size) {
+          result.push(current);
+          current = line;
+        } else {
+          current += (current ? '\n' : '') + line;
+        }
+      });
+      if (current) result.push(current);
+      return result;
+    }
+
+    function parseBlocks(data) {
       const blocks = (data && data.blocks) || [];
       const result = [];
       if (blocks.length === 0 && data && data.knowledge_points) {
@@ -133,11 +139,58 @@
           }
         });
       });
+      return result;
+    }
+
+    async function analyzeZone(zoneId, onProgress) {
+      const config = await core.getActiveAIConfig();
+      const files = await core.getZoneSourceFiles(zoneId);
+      if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
+      const parts = files.map((f) => `文件《${f.filename}》：\n${String(f.content || '').slice(0, 60000)}`);
+      const payload = parts.join('\n\n').slice(0, 200000);
+      const analyze = async (content) => {
+        const data = await chatJson(config.api_key, config.base_url, config.model, [
+          { role: 'system', content: ANALYZE_SYSTEM },
+          { role: 'user', content }
+        ]);
+        return parseBlocks(data);
+      };
+
+      if (payload.length <= 80000) {
+        const result = await analyze(payload);
+        if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
+        if (onProgress) onProgress(1, 1);
+        return result;
+      }
+
+      const chunks = splitText(payload, 60000);
+      const queue = chunks.slice();
+      const merged = new Map();
+      const seen = new Set();
+      let done = 0;
+      const worker = async () => {
+        while (queue.length) {
+          const chunk = queue.shift();
+          const points = await analyze(chunk);
+          points.forEach((p) => {
+            const key = `${p.block_name}::${p.title}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            if (!merged.has(p.block_name)) merged.set(p.block_name, []);
+            merged.get(p.block_name).push(p);
+          });
+          done++;
+          if (onProgress) onProgress(done, chunks.length);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, worker));
+      const result = [];
+      merged.forEach((points) => result.push(...points));
       if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
       return result;
     }
 
-    async function generateCards(zoneId, points) {
+    async function generateCards(zoneId, points, onProgress) {
       const config = await core.getActiveAIConfig();
       if (!points || !points.length) throw new AIError('请先执行分析并确认知识点');
       const flat = [];
@@ -160,24 +213,32 @@
         .filter((p) => p.title);
       let generated = 0;
       const failed = [];
-      for (let i = 0; i < normalized.length; i++) {
-        const point = normalized[i];
-        try {
-          const messages = [
-            { role: 'system', content: CARD_SYSTEM },
-            {
-              role: 'user',
-              content: `知识点：${point.title}\n补充说明：${point.description}\n请生成一道选择题。`
-            }
-          ];
-          const data = await chatJson(config.api_key, config.base_url, config.model, messages, 150000);
-          const card = parseCard(data);
-          const added = await core.generateCard(zoneId, point, card, i + 1);
-          if (added) generated++;
-        } catch (err) {
-          failed.push({ title: point.title, error: err.message || String(err) });
+      let done = 0;
+      const queue = normalized.map((point, i) => ({ point, i }));
+      const worker = async () => {
+        while (queue.length) {
+          const item = queue.shift();
+          const point = item.point;
+          try {
+            const messages = [
+              { role: 'system', content: CARD_SYSTEM },
+              {
+                role: 'user',
+                content: `知识点：${point.title}\n补充说明：${point.description}\n请生成一道选择题。`
+              }
+            ];
+            const data = await chatJson(config.api_key, config.base_url, config.model, messages, 150000);
+            const card = parseCard(data);
+            const added = await core.generateCard(zoneId, point, card, item.i + 1);
+            if (added) generated++;
+          } catch (err) {
+            failed.push({ title: point.title, error: err.message || String(err) });
+          }
+          done++;
+          if (onProgress) onProgress(done, normalized.length);
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, normalized.length) }, worker));
       return { generated, failed, total: normalized.length };
     }
 
@@ -235,7 +296,7 @@
         return {
           ok: true,
           latency: ((Date.now() - start) / 1000).toFixed(2),
-          reply: reply || 'OK',
+          reply: reply || '正常',
           model,
           channel: '直连'
         };

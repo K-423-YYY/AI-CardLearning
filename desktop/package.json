@@ -1,6 +1,6 @@
 {
   "name": "ai-learn-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "AI 闯关学习 Windows 桌面版外壳",
   "main": "main.js",
   "private": true,

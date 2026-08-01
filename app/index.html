@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=21">
+<link rel="stylesheet" href="./css/style.css?v=22">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -254,7 +254,7 @@
     <main class="main-content">
       <div class="settings-section">
         <h3>支持的文件类型</h3>
-        <p class="form-hint">txt、md、cpp、h、py、pdf 文本，单文件不超过 5MB</p>
+        <p class="form-hint">支持文本、Markdown、C++、头文件、Python、PDF 文档，单文件不超过 5MB</p>
         <p class="form-hint">PDF 需要是可复制文本的 PDF，不支持扫描图片</p>
         <input type="file" id="upload-file-input" class="upload-input" accept=".txt,.md,.cpp,.h,.py,.pdf">
         <div id="upload-file-name" class="upload-file-name"></div>
@@ -288,6 +288,14 @@
           <div class="ai-select-head">选择要删除的旧卡片</div>
           <div id="ai-select-list" class="ai-select-list"></div>
         </div>
+      </div>
+      <div id="ai-analyze-progress" class="ai-progress hidden">
+        <div class="ai-progress-bar"><div id="ai-analyze-bar" class="ai-progress-fill"></div></div>
+        <span id="ai-analyze-text"></span>
+      </div>
+      <div id="ai-gen-progress" class="ai-progress hidden">
+        <div class="ai-progress-bar"><div id="ai-gen-bar" class="ai-progress-fill"></div></div>
+        <span id="ai-gen-text"></span>
       </div>
       <div class="ai-actions">
         <button class="btn btn-primary btn-block" id="btn-ai-analyze">开始分析</button>
@@ -376,9 +384,9 @@
 
       <div class="settings-section">
         <h3>本地备份</h3>
-        <p class="form-hint" id="backup-info">数据只保存在本机，导出 zip 后可存网盘或发给他人。</p>
+        <p class="form-hint" id="backup-info">数据只保存在本机，导出压缩包后可存网盘或发给他人。</p>
         <div class="backup-actions">
-          <button class="btn btn-primary btn-block" id="btn-export-backup">导出完整备份 (.zip)</button>
+          <button class="btn btn-primary btn-block" id="btn-export-backup">导出完整备份（压缩包）</button>
           <button class="btn btn-outline btn-block" id="btn-import-backup">导入备份文件</button>
           <input type="file" id="import-file-input" accept=".zip" class="hidden">
         </div>
@@ -392,7 +400,7 @@
       <div id="provider-empty" class="empty-state hidden">
         <div class="empty-icon">🔌</div>
         <p>还没有服务商</p>
-        <p class="empty-hint">添加服务商后进入配置页填写 API</p>
+        <p class="empty-hint">添加服务商后进入配置页填写接口密钥</p>
       </div>
       <div id="settings-msg" class="toast hidden"></div>
       <div class="app-version" id="app-version"></div>
@@ -420,7 +428,7 @@
           <span class="form-hint">选择服务商模板可自动填入，也可手动修改</span>
         </div>
         <div class="form-group">
-          <label>API Key</label>
+          <label>接口密钥</label>
           <div class="key-row">
             <input type="password" id="p-api-key" placeholder="输入你的 API Key" autocomplete="off">
             <button class="btn btn-outline btn-sm" id="btn-toggle-key">显示</button>
@@ -449,7 +457,7 @@
 
       <div class="settings-section hidden" id="custom-template-section">
         <h3>自定义完整模板</h3>
-        <p class="form-hint">支持粘贴 CC Switch / 各类 API 配置软件导出的 JSON，字段：name、base_url、api_key、models</p>
+        <p class="form-hint">支持粘贴各类接口配置软件导出的 JSON 配置，字段：名称、接口地址、密钥、模型列表</p>
         <textarea id="template-json" rows="7" placeholder='{"name":"我的服务商","base_url":"https://api.example.com/v1","api_key":"sk-...","models":["model-1","model-2"]}'></textarea>
         <div class="template-actions">
           <button class="btn btn-outline btn-sm" id="btn-template-sample">填入示例</button>
@@ -479,19 +487,19 @@
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=21"></script>
-<script src="./js/local/db.js?v=21"></script>
-<script src="./js/local/core.js?v=21"></script>
-<script src="./js/local/ai.js?v=21"></script>
-<script src="./js/local/pdf.js?v=21"></script>
-<script src="./js/local/export.js?v=21"></script>
-<script src="./js/local/import.js?v=21"></script>
-<script src="./js/api.js?v=21"></script>
-<script src="./js/auth.js?v=21"></script>
-<script src="./js/zones.js?v=21"></script>
-<script src="./js/cards.js?v=21"></script>
-<script src="./js/settings.js?v=21"></script>
-<script src="./js/app.js?v=21"></script>
+<script src="./js/local/storage.js?v=22"></script>
+<script src="./js/local/db.js?v=22"></script>
+<script src="./js/local/core.js?v=22"></script>
+<script src="./js/local/ai.js?v=22"></script>
+<script src="./js/local/pdf.js?v=22"></script>
+<script src="./js/local/export.js?v=22"></script>
+<script src="./js/local/import.js?v=22"></script>
+<script src="./js/api.js?v=22"></script>
+<script src="./js/auth.js?v=22"></script>
+<script src="./js/zones.js?v=22"></script>
+<script src="./js/cards.js?v=22"></script>
+<script src="./js/settings.js?v=22"></script>
+<script src="./js/app.js?v=22"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

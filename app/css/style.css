@@ -767,3 +767,32 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   }
   .page:has(.btn-next.show) .main-content { padding-bottom: 84px; }
 }
+
+/* === AI progress === */
+.ai-progress {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-progress-bar {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ai-progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+.ai-progress span {
+  font-size: 0.75rem;
+  color: #64748b;
+}

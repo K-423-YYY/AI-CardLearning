@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.2';
+const APP_VERSION = '0.1.3';
 
 const Utils = {
   esc(str) {
@@ -104,7 +104,7 @@ const App = {
     const titles = {
       home: ['学习总览', '管理学习区，规划每日闯关'],
       zone: ['学习区详情', '上传资料、生成卡片、查看闯关路径'],
-      upload: ['上传文件', '支持 txt / md / cpp / h / py / pdf'],
+      upload: ['上传文件', '支持文本、Markdown、C++、头文件、Python、PDF 文档'],
       ai: ['AI 趋势分析', '自动提取知识点并生成知识卡片'],
       cards: ['知识卡片', '浏览、复习或删除全部卡片'],
       level: ['关卡学习', '完成本关任务'],

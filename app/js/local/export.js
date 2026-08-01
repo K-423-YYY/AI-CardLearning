@@ -17,7 +17,7 @@
     const zip = new JSZip();
     const manifest = {
       format_version: 1,
-      app_version: '0.1.2',
+      app_version: '0.1.3',
       exported_at: new Date().toISOString(),
       export_type: 'full',
       source_app: 'ai-learn-local'

@@ -109,7 +109,7 @@ const LocalAPI = {
             return LocalCoreInstance.addFile(zoneId, data);
           }
           if (sub === 'analyze' && method === 'POST') {
-            return { knowledge_points: await LocalAIInstance.analyzeZone(zoneId) };
+            return { knowledge_points: await LocalAIInstance.analyzeZone(zoneId, body && body.onProgress) };
           }
           if (sub === 'generate' && method === 'POST') {
             const replaceOld = (body && body.replace_old) || 'none';
@@ -121,7 +121,7 @@ const LocalAPI = {
               await LocalCoreInstance.batchDeleteCards((body && body.delete_card_ids) || []);
             }
             const points = body && body.blocks !== undefined ? body.blocks : body && body.knowledge_points;
-            const result = await LocalAIInstance.generateCards(zoneId, points || []);
+            const result = await LocalAIInstance.generateCards(zoneId, points || [], body && body.onProgress);
             await LocalCoreInstance.rebuildZoneLevels(zoneId, null, true);
             return result;
           }

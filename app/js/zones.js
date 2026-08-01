@@ -226,15 +226,20 @@ const Zones = {
     const analyzeBtn = document.getElementById('btn-ai-analyze');
     const regenerateBtn = document.getElementById('btn-ai-regenerate');
     const confirmBtn = document.getElementById('btn-ai-confirm');
+    const progressWrap = document.getElementById('ai-analyze-progress');
     analyzeBtn.disabled = true;
     regenerateBtn.disabled = true;
     resultEl.classList.add('hidden');
     resultEl.innerHTML = '';
     chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在分析文件并整理知识区块，请稍候...</div>';
+    if (progressWrap) progressWrap.classList.remove('hidden');
 
     try {
-      const data = await API.post(`/api/zones/${zoneId}/analyze`);
+      const data = await API.post(`/api/zones/${zoneId}/analyze`, {
+        onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total)
+      });
       this.aiPoints = data.knowledge_points || [];
+      if (progressWrap) progressWrap.classList.add('hidden');
       if (this.aiPoints.length === 0) {
         chat.innerHTML += '<div class="ai-msg ai-msg-bot">没有识别到知识点，请换一份资料重试。</div>';
         analyzeBtn.disabled = false;
@@ -269,18 +274,30 @@ const Zones = {
       confirmBtn.classList.remove('hidden');
       analyzeBtn.classList.add('hidden');
     } catch (e) {
+      if (progressWrap) progressWrap.classList.add('hidden');
       chat.innerHTML += `<div class="ai-msg ai-msg-bot">分析失败：${Utils.esc(e.message)}</div>`;
       analyzeBtn.disabled = false;
     }
+  },
+
+  updateAiProgress(barId, textId, done, total) {
+    const bar = document.getElementById(barId);
+    const text = document.getElementById(textId);
+    if (!bar || !text) return;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    bar.style.width = pct + '%';
+    text.textContent = `进度 ${done}/${total}（${pct}%）`;
   },
 
   async handleAiGenerate(zoneId) {
     if (!this.aiPoints.length) return;
     const confirmBtn = document.getElementById('btn-ai-confirm');
     const chat = document.getElementById('ai-chat');
+    const progressWrap = document.getElementById('ai-gen-progress');
     confirmBtn.disabled = true;
     confirmBtn.textContent = '生成中...';
     chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在按知识模块生成卡片，每一条知识点一张卡片...</div>';
+    if (progressWrap) progressWrap.classList.remove('hidden');
     const groups = {};
     this.aiPoints.forEach(p => {
       const block = p.block_name || '全部知识点';
@@ -294,7 +311,9 @@ const Zones = {
     try {
       const payload = { blocks, replace_old: replace };
       if (deleteIds.length) payload.delete_card_ids = deleteIds;
+      payload.onProgress = (done, total) => this.updateAiProgress('ai-gen-bar', 'ai-gen-text', done, total);
       const data = await API.post(`/api/zones/${zoneId}/generate`, payload);
+      if (progressWrap) progressWrap.classList.add('hidden');
       const failedCount = (data.failed || []).length;
       Toast.show(
         failedCount > 0
@@ -304,6 +323,7 @@ const Zones = {
       );
       App.navigate('zone', zoneId);
     } catch (e) {
+      if (progressWrap) progressWrap.classList.add('hidden');
       chat.innerHTML += `<div class="ai-msg ai-msg-bot">生成失败：${Utils.esc(e.message)}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = '确认生成卡片';
