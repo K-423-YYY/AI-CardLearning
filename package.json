@@ -4,7 +4,7 @@
   "private": true,
   "description": "AI 闯关学习 · 本地开源版",
   "scripts": {
-    "test": "node --test tests/core.test.js tests/ai-local.test.js",
+    "test": "node --test tests/core.test.js tests/ai-local.test.js tests/docx.test.js",
     "serve": "python serve.py"
   }
 }

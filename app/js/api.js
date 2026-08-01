@@ -2,8 +2,29 @@
 const LocalCoreInstance = LocalCore.create(LocalDB);
 const LocalAIInstance = LocalAI.create(LocalCoreInstance);
 
-const ALLOWED_EXTENSIONS = new Set(['.txt', '.md', '.cpp', '.h', '.py', '.pdf']);
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = new Set([
+  '.txt',
+  '.md',
+  '.cpp',
+  '.h',
+  '.py',
+  '.pdf',
+  '.docx',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp'
+]);
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp'
+};
 
 function parsePath(url) {
   return String(url)
@@ -23,6 +44,15 @@ function toApiError(err) {
   return new Error(String(err));
 }
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function readUploadFile(file) {
   const filename = file.name || 'unnamed.txt';
   const dot = filename.lastIndexOf('.');
@@ -34,17 +64,26 @@ async function readUploadFile(file) {
     );
     throw e;
   }
-  if (file.size > MAX_FILE_SIZE) {
-    throw new LocalCoreInstance.LocalError(4006, '文件不能超过 5MB');
-  }
   const buffer = await file.arrayBuffer();
   let content = '';
-  if (ext === '.pdf') {
+  let kind = 'text';
+  let mimeType = '';
+  if (ext === '.docx') {
+    try {
+      content = await LocalDocx.extractText(buffer);
+    } catch (err) {
+      throw new LocalCoreInstance.LocalError(4006, err.message || 'Word 解析失败，请上传有效的 .docx 文件');
+    }
+  } else if (ext === '.pdf') {
     try {
       content = await LocalPdf.extractText(buffer);
     } catch (err) {
       throw new LocalCoreInstance.LocalError(4006, 'PDF 解析失败，请上传可复制文本的 PDF');
     }
+  } else if (IMAGE_MIME[ext]) {
+    kind = 'image';
+    mimeType = IMAGE_MIME[ext];
+    content = await blobToDataUrl(new Blob([buffer], { type: mimeType }));
   } else {
     content = new TextDecoder('utf-8').decode(buffer);
     if (content.includes('\uFFFD')) {
@@ -59,7 +98,7 @@ async function readUploadFile(file) {
   if (!content) {
     throw new LocalCoreInstance.LocalError(4006, '文件中没有可读取的文本内容');
   }
-  return { filename, content };
+  return { filename, content, kind, mime_type: mimeType };
 }
 
 let writeQueue = Promise.resolve();

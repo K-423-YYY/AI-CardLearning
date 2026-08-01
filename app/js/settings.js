@@ -6,6 +6,7 @@ const Settings = {
   fetchedModels: [],
   keyShown: false,
   importFile: null,
+  settings: null,
 
   async render() {
     const tpl = document.getElementById('tpl-settings');
@@ -14,13 +15,17 @@ const Settings = {
     document.getElementById('btn-back-home-set').onclick = () => App.navigate('home');
     document.getElementById('btn-add-provider').onclick = () => this.showAddProviderModal();
     document.getElementById('btn-export-backup').onclick = () => this.handleExportBackup();
+    document.getElementById('btn-choose-backup-dir').onclick = () => this.chooseBackupDir();
+    document.getElementById('btn-open-backup-dir').onclick = () => this.openBackupDir();
     const importInput = document.getElementById('import-file-input');
     importInput.addEventListener('change', () => {
       this.importFile = importInput.files && importInput.files[0];
       if (this.importFile) this.showImportModal();
     });
-    document.getElementById('btn-import-backup').onclick = () => {
+    document.getElementById('btn-import-backup').onclick = async () => {
       if (window.desktopAPI && window.desktopAPI.isDesktop) this.importFromDesktop();
+      else if (this.settings && this.settings.backup_dir_uri && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) this.importFromCapacitorDir();
+      else if (await this.getBrowserDirHandle()) this.importFromBrowserDir();
       else importInput.click();
     };
 
@@ -30,9 +35,11 @@ const Settings = {
         API.get('/api/providers')
       ]);
       this.presets = data.providers || [];
+      this.settings = data;
       document.getElementById('set-nickname').value = data.nickname || '';
       document.getElementById('set-daily-limit').value = data.daily_card_limit || 5;
       document.getElementById('btn-save-profile').onclick = () => this.saveProfile();
+      this.renderBackupDir();
       this.renderProviderList(provData.providers || []);
       this.renderBackupInfo();
     } catch (e) {
@@ -55,6 +62,185 @@ const Settings = {
       }
     } catch (e) {
       el.textContent = '本地备份状态读取失败。';
+    }
+  },
+
+  renderBackupDir() {
+    const pathEl = document.getElementById('backup-dir-path');
+    const openBtn = document.getElementById('btn-open-backup-dir');
+    if (!pathEl || !openBtn) return;
+    const dir = this.backupDirValue();
+    const label = this.settings && this.settings.backup_dir_label;
+    if (!dir && !label) {
+      pathEl.textContent = '尚未设置，使用系统默认位置';
+      openBtn.classList.add('hidden');
+      return;
+    }
+    pathEl.textContent = label || dir;
+    openBtn.classList.remove('hidden');
+  },
+
+  backupDirValue() {
+    return (this.settings && (this.settings.backup_dir || this.settings.backup_dir_uri)) || '';
+  },
+
+  joinPath(dir, filename) {
+    const separator = dir.includes('\\') ? '\\' : '/';
+    return String(dir).replace(/[\\/]+$/, '') + separator + filename;
+  },
+
+  async getBrowserDirHandle() {
+    try {
+      return await LocalDB.get('settings', 'backup_dir_handle');
+    } catch (err) {
+      return null;
+    }
+  },
+
+  async chooseBackupDir() {
+    try {
+      let value = '';
+      let label = '';
+      if (window.desktopAPI && window.desktopAPI.isDesktop) {
+        const result = await window.desktopAPI.chooseDirectory();
+        if (!result || result.canceled) return;
+        value = result.path;
+        label = result.path;
+      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem && window.Capacitor.Plugins.Filesystem.pickDirectory) {
+        const result = await window.Capacitor.Plugins.Filesystem.pickDirectory();
+        value = result.uri;
+        label = '手机备份目录：' + result.uri;
+      } else if (window.showDirectoryPicker) {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        await LocalDB.put('settings', { id: 'backup_dir_handle', handle, name: handle.name });
+        value = '';
+        label = '浏览器已授权目录：' + handle.name;
+      } else {
+        Toast.show('当前环境不支持自定义备份目录，将使用默认下载位置', 'error');
+        return;
+      }
+      const body = { backup_dir_label: label };
+      if (window.desktopAPI && window.desktopAPI.isDesktop) body.backup_dir = value;
+      if (window.Capacitor) body.backup_dir_uri = value;
+      await API.put('/api/settings', body);
+      this.settings = await API.get('/api/settings');
+      this.renderBackupDir();
+      Toast.show('备份目录已设置', 'success');
+    } catch (e) {
+      Toast.show(e.message, 'error');
+    }
+  },
+
+  async openBackupDir() {
+    try {
+      if (window.desktopAPI && window.desktopAPI.isDesktop && this.settings && this.settings.backup_dir) {
+        const result = await window.desktopAPI.openPath(this.settings.backup_dir);
+        if (!result.ok) Toast.show(result.error || '无法打开目录', 'error');
+        return;
+      }
+      if (this.settings && this.settings.backup_dir_uri) {
+        Toast.show('手机备份目录：' + this.settings.backup_dir_uri, 'success');
+        return;
+      }
+      const handle = await this.getBrowserDirHandle();
+      if (handle) {
+        Toast.show('浏览器备份目录：' + handle.name, 'success');
+        return;
+      }
+      Toast.show('当前没有可打开的备份目录', 'error');
+    } catch (e) {
+      Toast.show(e.message, 'error');
+    }
+  },
+
+  async importFromBrowserDir() {
+    const handleRow = await this.getBrowserDirHandle();
+    if (!handleRow) return;
+    const entries = [];
+    try {
+      for await (const [name, handle] of handleRow.handle.entries()) {
+        if (handle.kind === 'file' && name.toLowerCase().endsWith('.zip')) {
+          entries.push({ name, handle });
+        }
+      }
+    } catch (e) {
+      Toast.show('无法读取浏览器备份目录：' + e.message, 'error');
+      return;
+    }
+    if (!entries.length) {
+      Toast.show('备份目录中没有找到 .zip 备份文件', 'error');
+      return;
+    }
+    const modal = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    box.innerHTML = `
+      <h3>从备份目录导入</h3>
+      <div class="ai-select-list">
+        ${entries.map((entry, idx) => `
+          <button class="btn btn-outline btn-sm btn-block" data-idx="${idx}">${Utils.esc(entry.name)}</button>
+        `).join('')}
+      </div>
+      <div class="modal-actions"><button class="btn btn-outline btn-sm" id="modal-cancel">取消</button></div>
+    `;
+    modal.classList.remove('hidden');
+    box.querySelectorAll('[data-idx]').forEach((btn) => {
+      btn.onclick = async () => {
+        const entry = entries[parseInt(btn.dataset.idx, 10)];
+        modal.classList.add('hidden');
+        try {
+          const file = await entry.handle.getFile();
+          this.importFile = file;
+          this.showImportModal();
+        } catch (e) {
+          Toast.show('读取备份失败：' + e.message, 'error');
+        }
+      };
+    });
+    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
+  },
+
+  async importFromCapacitorDir() {
+    try {
+      const fs = window.Capacitor.Plugins.Filesystem;
+      const result = await fs.readdir({ path: this.settings.backup_dir_uri });
+      const files = (result.files || []).filter((f) => String(f.name || '').toLowerCase().endsWith('.zip'));
+      if (!files.length) {
+        Toast.show('备份目录中没有找到 .zip 备份文件', 'error');
+        return;
+      }
+      const modal = document.getElementById('modal');
+      const box = document.getElementById('modal-box');
+      box.innerHTML = `
+        <h3>从备份目录导入</h3>
+        <div class="ai-select-list">
+          ${files.map((f, idx) => `
+            <button class="btn btn-outline btn-sm btn-block" data-idx="${idx}">${Utils.esc(f.name)}</button>
+          `).join('')}
+        </div>
+        <div class="modal-actions"><button class="btn btn-outline btn-sm" id="modal-cancel">取消</button></div>
+      `;
+      modal.classList.remove('hidden');
+      box.querySelectorAll('[data-idx]').forEach((btn) => {
+        btn.onclick = async () => {
+          const file = files[parseInt(btn.dataset.idx, 10)];
+          modal.classList.add('hidden');
+          try {
+            const content = await fs.readFile({ path: this.joinPath(this.settings.backup_dir_uri, file.name) });
+            const base64 = String(content.data || '');
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            this.importFile = new File([bytes], file.name, { type: 'application/zip' });
+            this.showImportModal();
+          } catch (e) {
+            Toast.show('读取备份失败：' + e.message, 'error');
+          }
+        };
+      });
+      document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
+    } catch (e) {
+      Toast.show('无法读取手机备份目录，已打开系统文件选择器', 'error');
+      document.getElementById('import-file-input').click();
     }
   },
 
@@ -464,23 +650,95 @@ const Settings = {
   async handleExportBackup() {
     try {
       const { blob, filename } = await API.exportBackup();
+      const data = await blob.arrayBuffer();
+      let savedPath = '';
+      const dir = this.backupDirValue();
       if (window.desktopAPI && window.desktopAPI.isDesktop) {
-        const data = await blob.arrayBuffer();
-        await window.desktopAPI.saveZip(filename, data);
+        if (dir) {
+          const exists = await window.desktopAPI.pathExists(dir);
+          if (exists) {
+            const filePath = this.joinPath(dir, filename);
+            const result = await window.desktopAPI.writeZip(filePath, data);
+            if (result.ok) savedPath = filePath;
+            else throw new Error(result.error || '写入备份失败');
+          } else {
+            const result = await window.desktopAPI.saveZip(filename, data);
+            if (result && result.filePath) savedPath = result.filePath;
+          }
+        } else {
+          const result = await window.desktopAPI.saveZip(filename, data);
+          if (result && result.filePath) savedPath = result.filePath;
+        }
+      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem && dir) {
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error || new Error('读取备份失败'));
+            reader.readAsDataURL(blob);
+          });
+          const base64 = String(dataUrl).split(',')[1] || '';
+          const target = this.joinPath(dir, filename);
+          await window.Capacitor.Plugins.Filesystem.writeFile({ path: target, data: base64 });
+          savedPath = target;
+        } catch (e) {
+          savedPath = '';
+          LocalExport.downloadBlob(blob, filename);
+        }
+      } else if (await this.getBrowserDirHandle()) {
+        try {
+          const handleRow = await this.getBrowserDirHandle();
+          const fileHandle = await handleRow.handle.getFileHandle(filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          savedPath = handleRow.name + '/' + filename;
+        } catch (e) {
+          savedPath = '';
+          LocalExport.downloadBlob(blob, filename);
+        }
       } else {
         LocalExport.downloadBlob(blob, filename);
+        savedPath = '浏览器默认下载目录/' + filename;
       }
       await API.markExported();
-      Toast.show('备份已导出，文件名：' + filename, 'success');
       this.renderBackupInfo();
+      this.showExportResult(filename, savedPath);
     } catch (e) {
       Toast.show(e.message, 'error');
     }
   },
 
+  showExportResult(filename, path) {
+    const modal = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    const canOpen = window.desktopAPI && window.desktopAPI.isDesktop && path;
+    box.innerHTML = `
+      <h3>备份已导出</h3>
+      <p style="font-size:0.9rem;color:#334155;word-break:break-all;">文件名：${Utils.esc(filename)}</p>
+      <p style="font-size:0.85rem;color:#64748b;word-break:break-all;margin:8px 0 16px;">保存位置：${Utils.esc(path || '系统默认下载位置')}</p>
+      <div class="modal-actions">
+        <button class="btn btn-outline btn-sm ${canOpen ? '' : 'hidden'}" id="modal-open-path">打开位置</button>
+        <button class="btn btn-primary btn-sm" id="modal-cancel">完成</button>
+      </div>
+    `;
+    modal.classList.remove('hidden');
+    if (canOpen) {
+      document.getElementById('modal-open-path').onclick = async () => {
+        const idx = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+        const dir = idx > 0 ? path.slice(0, idx) : path;
+        await window.desktopAPI.openPath(dir);
+      };
+    }
+    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
+  },
+
   async importFromDesktop() {
     try {
-      const result = await window.desktopAPI.openZip();
+      const dir = this.backupDirValue();
+      const result = dir
+        ? await window.desktopAPI.openZipAt(dir)
+        : await window.desktopAPI.openZip();
       if (!result || result.canceled) return;
       this.importFile = new File([result.data], result.name, { type: 'application/zip' });
       this.showImportModal();

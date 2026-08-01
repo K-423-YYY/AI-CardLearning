@@ -1,5 +1,9 @@
+import base64
+import html
 import io
 import math
+import re
+import zipfile
 from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
@@ -455,6 +459,40 @@ def _decode_text(raw: bytes) -> str:
     return ""
 
 
+def _decode_docx(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            if "word/document.xml" not in archive.namelist():
+                raise ValueError("缺少 word/document.xml")
+            xml = archive.read("word/document.xml")
+            if len(xml) > 50 * 1024 * 1024:
+                raise ValueError("Word 文档内容过大，已超过安全解析范围")
+            text = xml.decode("utf-8", "ignore")
+            text = re.sub(r"<w:tab[^>]*/>", "\t", text)
+            text = re.sub(r"<w:br[^>]*/>", "\n", text)
+            text = re.sub(r"</w:p>", "\n", text)
+            text = re.sub(r"<[^>]+>", "", text)
+            text = html.unescape(text)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Word 解析失败：{exc}")
+    lines = [line.strip() for line in text.split("\n")]
+    clean = []
+    for line in lines:
+        if line or (clean and clean[-1] != ""):
+            clean.append(line)
+    return "\n".join(clean).strip()
+
+
+IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
+
+
 @router.get("/api/zones")
 def list_zones(user: dict = Depends(get_current_user)):
     with closing(get_connection()) as conn:
@@ -576,10 +614,15 @@ def upload_file(zone_id: int, file: UploadFile = File(...), user: dict = Depends
             )
 
         raw = file.file.read()
-        if len(raw) > config.MAX_FILE_SIZE:
-            return fail(4006, "文件不能超过 5MB", 400)
 
-        if ext == ".pdf":
+        if ext in IMAGE_MIME:
+            content = f"data:{IMAGE_MIME[ext]};base64,{base64.b64encode(raw).decode('ascii')}"
+        elif ext == ".docx":
+            try:
+                content = _decode_docx(raw)
+            except ValueError as exc:
+                return fail(4006, str(exc), 400)
+        elif ext == ".pdf":
             try:
                 from pypdf import PdfReader
 

@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=24">
+<link rel="stylesheet" href="./css/style.css?v=25">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -254,9 +254,9 @@
     <main class="main-content">
       <div class="settings-section">
         <h3>支持的文件类型</h3>
-        <p class="form-hint">支持文本、Markdown、C++、头文件、Python、PDF 文档，单文件不超过 5MB</p>
+        <p class="form-hint">支持文本、Markdown、C++、头文件、Python、PDF、Word(.docx) 和图片</p>
         <p class="form-hint">PDF 需要是可复制文本的 PDF，不支持扫描图片</p>
-        <input type="file" id="upload-file-input" class="upload-input" accept=".txt,.md,.cpp,.h,.py,.pdf">
+        <input type="file" id="upload-file-input" class="upload-input" accept=".txt,.md,.cpp,.h,.py,.pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.bmp">
         <div id="upload-file-name" class="upload-file-name"></div>
         <button class="btn btn-primary btn-block" id="btn-upload-confirm" disabled>确认上传</button>
       </div>
@@ -395,6 +395,16 @@
           <input type="file" id="import-file-input" accept=".zip" class="hidden">
         </div>
       </div>
+
+      <div class="settings-section">
+        <h3>备份目录</h3>
+        <p class="form-hint">设置后导出会优先保存到这里，导入也会优先打开该目录；未设置时使用系统默认位置。</p>
+        <div id="backup-dir-path" class="backup-dir-path">尚未设置，使用系统默认位置</div>
+        <div class="backup-actions">
+          <button class="btn btn-outline btn-block" id="btn-choose-backup-dir">选择备份目录</button>
+          <button class="btn btn-outline btn-block hidden" id="btn-open-backup-dir">打开备份目录</button>
+        </div>
+      </div>
       
       <div class="section-header">
         <h3>AI 服务商</h3>
@@ -486,24 +496,25 @@
 </div>
 
 <script src="./vendor/jszip.min.js"></script>
+<script src="./js/local/docx.js?v=25"></script>
 <script type="module">
   import * as pdfjsLib from './vendor/pdf.mjs';
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=24"></script>
-<script src="./js/local/db.js?v=24"></script>
-<script src="./js/local/core.js?v=24"></script>
-<script src="./js/local/ai.js?v=24"></script>
-<script src="./js/local/pdf.js?v=24"></script>
-<script src="./js/local/export.js?v=24"></script>
-<script src="./js/local/import.js?v=24"></script>
-<script src="./js/api.js?v=24"></script>
-<script src="./js/auth.js?v=24"></script>
-<script src="./js/zones.js?v=24"></script>
-<script src="./js/cards.js?v=24"></script>
-<script src="./js/settings.js?v=24"></script>
-<script src="./js/app.js?v=24"></script>
+<script src="./js/local/storage.js?v=25"></script>
+<script src="./js/local/db.js?v=25"></script>
+<script src="./js/local/core.js?v=25"></script>
+<script src="./js/local/ai.js?v=25"></script>
+<script src="./js/local/pdf.js?v=25"></script>
+<script src="./js/local/export.js?v=25"></script>
+<script src="./js/local/import.js?v=25"></script>
+<script src="./js/api.js?v=25"></script>
+<script src="./js/auth.js?v=25"></script>
+<script src="./js/zones.js?v=25"></script>
+<script src="./js/cards.js?v=25"></script>
+<script src="./js/settings.js?v=25"></script>
+<script src="./js/app.js?v=25"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

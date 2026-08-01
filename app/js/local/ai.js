@@ -6,7 +6,7 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   const ANALYZE_SYSTEM =
-    '你是学习资料分析助手。请阅读用户上传的学习资料，完整提取全部核心知识点，' +
+    '你是学习资料分析助手。请阅读用户上传的文字、Word 文档或图片资料，完整提取全部核心知识点，' +
     '不得遗漏文件中的任何知识点，也不能凭空增加文件里没有的内容。' +
     '把知识点按内容主题分成若干个区块，每个知识点只能属于一个区块。' +
     '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}]}。' +
@@ -159,22 +159,35 @@
       if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
       const jobs = [];
       files.forEach((f) => {
+        if (f.kind === 'image' || /^data:image\//.test(String(f.content || ''))) {
+          jobs.push({ image: String(f.content || ''), filename: f.filename, fileId: f.id });
+          return;
+        }
         const text = String(f.content || '').slice(0, CHUNK_SIZE);
         const content = `文件《${f.filename}》：\n${text}`;
         splitText(content, CHUNK_SIZE).forEach((chunk) => {
           jobs.push({ chunk, fileId: f.id });
         });
       });
-      const analyze = async (content, fileId) => {
+      const analyze = async (job) => {
+        const userContent = job.image
+          ? [
+              {
+                type: 'text',
+                text: `请分析这张图片《${job.filename}》，提取其中全部核心知识点并按区块整理。`
+              },
+              { type: 'image_url', image_url: { url: job.image } }
+            ]
+          : job.chunk;
         const data = await chatJson(config.api_key, config.base_url, config.model, [
           { role: 'system', content: ANALYZE_SYSTEM },
-          { role: 'user', content }
+          { role: 'user', content: userContent }
         ]);
-        return parseBlocks(data, fileId);
+        return parseBlocks(data, job.fileId);
       };
 
       if (jobs.length === 1) {
-        const result = await analyze(jobs[0].chunk, jobs[0].fileId);
+        const result = await analyze(jobs[0]);
         if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
         if (onProgress) onProgress(1, 1);
         return result;
@@ -187,7 +200,7 @@
       const worker = async () => {
         while (queue.length) {
           const job = queue.shift();
-          const points = await analyze(job.chunk, job.fileId);
+          const points = await analyze(job);
           points.forEach((p) => {
             const key = `${p.block_name}::${p.title}`;
             if (seen.has(key)) return;

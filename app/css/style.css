@@ -490,6 +490,11 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .desktop-only { display: none; }
 .desktop-hero { display: none; }
 .backup-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.backup-dir-path {
+  padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0;
+  border-radius: 8px; font-size: 0.8rem; color: #334155; word-break: break-all;
+  margin-top: 10px;
+}
 .import-option-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 12px; font-size: 0.9rem; }
 .import-option-list label { display: flex; align-items: center; gap: 8px; }
 .import-preserve { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin-top: 4px; }

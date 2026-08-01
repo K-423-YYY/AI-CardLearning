@@ -86,7 +86,21 @@ SEND_INTERVAL_SECONDS = 60
 EMAIL_CODE_LIMIT = int(os.getenv("EMAIL_CODE_LIMIT", "10"))
 MAX_VERIFY_ATTEMPTS = 5
 MAX_FILE_SIZE = 5 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".txt", ".md", ".cpp", ".h", ".py", ".pdf"}
+ALLOWED_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".cpp",
+    ".h",
+    ".py",
+    ".pdf",
+    ".docx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+}
 DEFAULT_DAILY_LIMIT = 5
 AI_TIMEOUT_SECONDS = 90
 MODELS_TIMEOUT_SECONDS = 15

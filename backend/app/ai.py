@@ -13,7 +13,7 @@ from .database import get_connection
 from .settings import decrypt_secret
 
 ANALYZE_SYSTEM = (
-    "你是学习资料分析助手。请阅读用户上传的学习资料，完整提取全部核心知识点，"
+    "你是学习资料分析助手。请阅读用户上传的文字、Word 文档或图片资料，完整提取全部核心知识点，"
     "不得遗漏文件中的任何知识点，也不能凭空增加文件里没有的内容。"
     "把知识点按内容主题分成若干个区块，每个知识点只能属于一个区块。"
     '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}]}。'
@@ -231,26 +231,40 @@ def analyze_zone(user_id: int, zone_id: int, file_ids: list[int] | None = None) 
             raise AIError("学习区还没有文件，请先上传文件")
         jobs = []
         for f in files:
-            text = (f["content"] or "")[:CHUNK_SIZE]
-            content = f"文件《{f['filename']}》：\n{text}"
-            for chunk in _split_text(content, CHUNK_SIZE):
-                jobs.append((chunk, f["id"]))
+            content = f["content"] or ""
+            if content.startswith("data:image/"):
+                jobs.append({"image": content, "filename": f["filename"], "file_id": f["id"]})
+            else:
+                text = content[:CHUNK_SIZE]
+                content_with_name = f"文件《{f['filename']}》：\n{text}"
+                for chunk in _split_text(content_with_name, CHUNK_SIZE):
+                    jobs.append({"chunk": chunk, "file_id": f["id"]})
 
-    def analyze_one(content: str, file_id: int) -> list[dict]:
+    def analyze_one(job: dict) -> list[dict]:
+        if job.get("image"):
+            user_content = [
+                {
+                    "type": "text",
+                    "text": f"请分析这张图片《{job['filename']}》，提取其中全部核心知识点并按区块整理。",
+                },
+                {"type": "image_url", "image_url": {"url": job["image"]}},
+            ]
+        else:
+            user_content = job["chunk"]
         messages = [
             {"role": "system", "content": ANALYZE_SYSTEM},
-            {"role": "user", "content": content},
+            {"role": "user", "content": user_content},
         ]
         data = _chat_json(api_key, base_url, model, messages)
-        return _parse_analysis(data, file_id)
+        return _parse_analysis(data, job["file_id"])
 
     if len(jobs) == 1:
-        result = analyze_one(jobs[0][0], jobs[0][1])
+        result = analyze_one(jobs[0])
     else:
         merged = {}
         seen = set()
         with ThreadPoolExecutor(max_workers=ANALYZE_CONCURRENCY) as pool:
-            future_map = {pool.submit(analyze_one, content, file_id): file_id for content, file_id in jobs}
+            future_map = {pool.submit(analyze_one, job): job for job in jobs}
             for future in as_completed(future_map):
                 for point in future.result():
                     key = f"{point['block_name']}::{point['title']}"

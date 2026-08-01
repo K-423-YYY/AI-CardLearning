@@ -28,13 +28,19 @@ test('local AI analysis filters files and card generation batches', async () => 
   global.fetch = async (url, options) => {
     const body = JSON.parse(options.body);
     const user = body.messages[1].content;
-    if (user.includes('AAA')) {
+    const userText = Array.isArray(user)
+      ? (user.find((part) => part.type === 'text') || {}).text || ''
+      : user;
+    if (userText.includes('这张图片')) {
+      return fakeResponse({ blocks: [{ name: '图片区', points: [{ title: '图片知识点', difficulty: '中' }] }] });
+    }
+    if (userText.includes('AAA')) {
       return fakeResponse({ blocks: [{ name: 'A 区', points: [{ title: 'A 点', difficulty: '易' }] }] });
     }
-    if (user.includes('BBB')) {
+    if (userText.includes('BBB')) {
       return fakeResponse({ blocks: [{ name: 'B 区', points: [{ title: 'B 点', difficulty: '难' }] }] });
     }
-    if (user.includes('请按顺序')) {
+    if (userText.includes('请按顺序')) {
       return fakeResponse({
         cards: [1, 2, 3].map((n) => ({
           question: `题干 ${n}`,
@@ -53,6 +59,17 @@ test('local AI analysis filters files and card generation batches', async () => 
     assert.strictEqual(points.length, 1);
     assert.strictEqual(points[0].title, 'A 点');
     assert.strictEqual(points[0].file_id, fileA.id);
+
+    const imageFile = await core.addFile(zoneId, {
+      filename: 'note.png',
+      content: 'data:image/png;base64,AAAA',
+      kind: 'image',
+      mime_type: 'image/png'
+    });
+    const imagePoints = await ai.analyzeZone(zoneId, null, [imageFile.id]);
+    assert.strictEqual(imagePoints.length, 1);
+    assert.strictEqual(imagePoints[0].title, '图片知识点');
+    assert.strictEqual(imagePoints[0].file_id, imageFile.id);
 
     const result = await ai.generateCards(
       zoneId,

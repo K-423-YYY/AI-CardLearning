@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { shell } = require('electron');
 
 let mainWindow = null;
 
@@ -55,10 +56,50 @@ ipcMain.handle('save-zip', async (event, payload) => {
   return { canceled: false, filePath: result.filePath };
 });
 
-ipcMain.handle('open-zip', async () => {
+ipcMain.handle('write-zip', async (event, payload) => {
+  const filePath = payload && payload.filePath ? String(payload.filePath) : '';
+  const data = payload && payload.data;
+  if (!filePath || !data) return { ok: false, error: '缺少保存路径或数据' };
+  try {
+    fs.writeFileSync(filePath, Buffer.from(data));
+    return { ok: true, filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('choose-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择备份目录',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths || !result.filePaths.length) {
+    return { canceled: true };
+  }
+  return { canceled: false, path: result.filePaths[0] };
+});
+
+ipcMain.handle('open-path', async (event, targetPath) => {
+  if (!targetPath) return { ok: false, error: '路径为空' };
+  const err = await shell.openPath(String(targetPath));
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+ipcMain.handle('path-exists', async (event, targetPath) => {
+  if (!targetPath) return false;
+  try {
+    return fs.existsSync(String(targetPath));
+  } catch (err) {
+    return false;
+  }
+});
+
+ipcMain.handle('open-zip', async (event, payload) => {
+  const defaultPath = payload && payload.defaultPath ? String(payload.defaultPath) : undefined;
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '导入备份',
     properties: ['openFile'],
+    defaultPath,
     filters: [{ name: 'ZIP 备份', extensions: ['zip'] }]
   });
   if (result.canceled || !result.filePaths || !result.filePaths.length) {

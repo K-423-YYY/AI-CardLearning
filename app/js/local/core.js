@@ -813,6 +813,9 @@
         ai_model: s.ai_model || '',
         ai_api_key_configured: !!(active && active.api_key_encrypted),
         ai_api_key_masked: active && active.api_key_encrypted ? await maskKey(await decryptSecret(active.api_key_encrypted)) : '',
+        backup_dir: s.backup_dir || '',
+        backup_dir_uri: s.backup_dir_uri || '',
+        backup_dir_label: s.backup_dir_label || '',
         providers: Object.entries(AI_PROVIDERS).map(([id, preset]) => ({
           id,
           name: preset.name,
@@ -838,6 +841,9 @@
       if (body.ai_api_key !== undefined && String(body.ai_api_key).trim()) {
         s.ai_api_key_encrypted = await encryptSecret(String(body.ai_api_key).trim());
       }
+      if (body.backup_dir !== undefined) s.backup_dir = String(body.backup_dir).trim();
+      if (body.backup_dir_uri !== undefined) s.backup_dir_uri = String(body.backup_dir_uri).trim();
+      if (body.backup_dir_label !== undefined) s.backup_dir_label = String(body.backup_dir_label).trim();
       await db.put('settings', { id: 'profile', ...profile });
       await db.put('settings', { id: 'user_settings', ...s });
       await ensureDefaultProvider();
@@ -1014,7 +1020,13 @@
       const ids = fileIds && fileIds.length ? new Set(fileIds.map(Number)) : null;
       return (await db.where('files', (f) => f.zone_id === zoneId && (!ids || ids.has(f.id))))
         .sort((a, b) => a.id - b.id)
-        .map((f) => ({ id: f.id, filename: f.filename, content: f.content }));
+        .map((f) => ({
+          id: f.id,
+          filename: f.filename,
+          content: f.content,
+          kind: f.kind || 'text',
+          mime_type: f.mime_type || ''
+        }));
     }
 
     async function getReviewSchedule(zoneId) {
@@ -1155,6 +1167,8 @@
             zone_id: newZone.id,
             filename: oldFile.filename,
             content,
+            kind: oldFile.kind || 'text',
+            mime_type: oldFile.mime_type || '',
             created_at: oldFile.created_at || nowStr()
           });
           fileMap.set(oldFile.id, newFile.id);
@@ -1419,6 +1433,8 @@
           zone_id: zoneId,
           filename: fileData.filename,
           content: fileData.content,
+          kind: fileData.kind || 'text',
+          mime_type: fileData.mime_type || '',
           created_at: now
         });
         const zone = await db.get('zones', zoneId);
