@@ -1,0 +1,15 @@
+{
+  "name": "@ailearn/directory-picker",
+  "version": "1.0.0",
+  "description": "Android Storage Access Framework directory picker and writer for AI learning backup",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}

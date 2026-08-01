@@ -25,7 +25,7 @@ const Settings = {
     });
     document.getElementById('btn-import-backup').onclick = async () => {
       if (window.desktopAPI && window.desktopAPI.isDesktop) this.importFromDesktop();
-      else if (this.settings && this.settings.backup_dir_uri && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) this.importFromCapacitorDir();
+      else if (this.settings && this.settings.backup_dir_uri && window.Capacitor && this.nativeDirPlugin()) this.importFromCapacitorDir();
       else if (await this.getBrowserDirHandle()) this.importFromBrowserDir();
       else importInput.click();
     };
@@ -88,10 +88,19 @@ const Settings = {
     return (this.settings && (this.settings.backup_dir || this.settings.backup_dir_uri)) || '';
   },
 
+  nativeDirPlugin() {
+    if (window.AILearnDirectoryPicker) return window.AILearnDirectoryPicker;
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AILearnDirectoryPicker) {
+      return window.Capacitor.Plugins.AILearnDirectoryPicker;
+    }
+    return null;
+  },
+
   async ensureCapacitorDir() {
     if (this.settings && this.settings.backup_dir_uri) return this.settings.backup_dir_uri;
-    if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.Filesystem || !window.Capacitor.Plugins.Filesystem.pickDirectory) return '';
-    const result = await window.Capacitor.Plugins.Filesystem.pickDirectory();
+    const plugin = this.nativeDirPlugin();
+    if (!plugin || !plugin.pickDirectory) return '';
+    const result = await plugin.pickDirectory();
     if (!result || !result.uri) return '';
     await API.put('/api/settings', {
       backup_dir_uri: result.uri,
@@ -123,8 +132,9 @@ const Settings = {
         if (!result || result.canceled) return;
         value = result.path;
         label = result.path;
-      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem && window.Capacitor.Plugins.Filesystem.pickDirectory) {
-        const result = await window.Capacitor.Plugins.Filesystem.pickDirectory();
+      } else if (window.Capacitor && this.nativeDirPlugin() && this.nativeDirPlugin().pickDirectory) {
+        const plugin = this.nativeDirPlugin();
+        const result = await plugin.pickDirectory();
         value = result.uri;
         label = '手机备份目录：' + result.uri;
       } else if (window.showDirectoryPicker) {
@@ -218,8 +228,8 @@ const Settings = {
 
   async importFromCapacitorDir() {
     try {
-      const fs = window.Capacitor.Plugins.Filesystem;
-      const result = await fs.readdir({ path: this.settings.backup_dir_uri });
+      const plugin = this.nativeDirPlugin();
+      const result = await plugin.listFiles({ uri: this.settings.backup_dir_uri });
       const files = (result.files || []).filter((f) => String(f.name || '').toLowerCase().endsWith('.zip'));
       if (!files.length) {
         Toast.show('备份目录中没有找到 .zip 备份文件', 'error');
@@ -242,7 +252,7 @@ const Settings = {
           const file = files[parseInt(btn.dataset.idx, 10)];
           modal.classList.add('hidden');
           try {
-            const content = await fs.readFile({ path: this.joinPath(this.settings.backup_dir_uri, file.name) });
+            const content = await plugin.readFile({ uri: file.uri });
             const base64 = String(content.data || '');
             const binary = atob(base64);
             const bytes = new Uint8Array(binary.length);
@@ -686,7 +696,7 @@ const Settings = {
           const result = await window.desktopAPI.saveZip(filename, data);
           if (result && result.filePath) savedPath = result.filePath;
         }
-      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+      } else if (window.Capacitor && this.nativeDirPlugin()) {
         try {
           const targetDir = dir || (await this.ensureCapacitorDir());
           if (!targetDir) throw new Error('未选择备份目录');
@@ -697,9 +707,8 @@ const Settings = {
             reader.readAsDataURL(blob);
           });
           const base64 = String(dataUrl).split(',')[1] || '';
-          const target = this.joinPath(targetDir, filename);
-          await window.Capacitor.Plugins.Filesystem.writeFile({ path: target, data: base64 });
-          savedPath = target;
+          await this.nativeDirPlugin().writeFile({ uri: targetDir, filename, data: base64 });
+          savedPath = this.joinPath(targetDir, filename);
         } catch (e) {
           savedPath = '';
           LocalExport.downloadBlob(blob, filename);

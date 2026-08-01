@@ -47,7 +47,8 @@ jobs:
         working-directory: android
         run: |
           npm init -y
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/filesystem@6
+          npm install @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor/filesystem@8
+          npm install ./local-plugins/ailearn-directory-picker
           npx cap add android
           npx cap sync android
       - name: Build debug APK

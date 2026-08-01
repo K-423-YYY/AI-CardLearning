@@ -6,13 +6,15 @@
 ## 前置条件
 
 - 安装 Node.js 18+ 与 Java 17+（推荐 Java 21）
-- 固定使用 Capacitor 6：`@capacitor/core@6 @capacitor/cli@6 @capacitor/android@6`
+- 固定使用 Capacitor 8：`@capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor/filesystem@8`
+- 本地原生插件：`local-plugins/ailearn-directory-picker`，用于系统目录选择和 Storage Access Framework 写入
 - 安装 Android Studio，并配置 `ANDROID_HOME`
 - 在 `android/` 目录执行以下命令：
 
 ```bash
 npm init -y
 npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem
+npm install ./local-plugins/ailearn-directory-picker
 npx cap add android
 npx cap sync android
 ```
@@ -30,7 +32,7 @@ cd android
 
 - 数据全部保存在应用本机，不经过服务器。
 - 导出备份使用系统文件选择器，可保存到本地、网盘或云盘目录。
-- “备份目录”设置会调用系统目录选择器，导出优先写入所选目录；未设置时导出会先弹出目录选择器，支持本地文件夹和网盘/云盘目录，导入优先打开该目录。
+- “备份目录”设置会调用 Android 系统目录选择器，导出优先写入所选目录；未设置时导出会先弹出目录选择器，支持本地文件夹和网盘/云盘目录，导入优先打开该目录。
 - 卸载应用即清空数据，符合“删除即清空”的产品决策。
 - 覆盖安装新版不会清除本地数据；只有卸载应用才会清空。
 
