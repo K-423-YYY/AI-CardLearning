@@ -17,6 +17,7 @@ const Settings = {
     document.getElementById('btn-export-backup').onclick = () => this.handleExportBackup();
     document.getElementById('btn-choose-backup-dir').onclick = () => this.chooseBackupDir();
     document.getElementById('btn-open-backup-dir').onclick = () => this.openBackupDir();
+    document.getElementById('btn-save-speed-tiers').onclick = () => this.saveSpeedTiers();
     const importInput = document.getElementById('import-file-input');
     importInput.addEventListener('change', () => {
       this.importFile = importInput.files && importInput.files[0];
@@ -38,6 +39,9 @@ const Settings = {
       this.settings = data;
       document.getElementById('set-nickname').value = data.nickname || '';
       document.getElementById('set-daily-limit').value = data.daily_card_limit || 5;
+      document.getElementById('speed-tier2-mb').value = data.speed_tier2_mb || 1;
+      document.getElementById('speed-tier3-mb').value = data.speed_tier3_mb || 5;
+      document.getElementById('speed-tier4-mb').value = data.speed_tier4_mb || 20;
       document.getElementById('btn-save-profile').onclick = () => this.saveProfile();
       this.renderBackupDir();
       this.renderProviderList(provData.providers || []);
@@ -82,6 +86,19 @@ const Settings = {
 
   backupDirValue() {
     return (this.settings && (this.settings.backup_dir || this.settings.backup_dir_uri)) || '';
+  },
+
+  async ensureCapacitorDir() {
+    if (this.settings && this.settings.backup_dir_uri) return this.settings.backup_dir_uri;
+    if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.Filesystem || !window.Capacitor.Plugins.Filesystem.pickDirectory) return '';
+    const result = await window.Capacitor.Plugins.Filesystem.pickDirectory();
+    if (!result || !result.uri) return '';
+    await API.put('/api/settings', {
+      backup_dir_uri: result.uri,
+      backup_dir_label: '手机备份目录：' + result.uri
+    });
+    this.settings = await API.get('/api/settings');
+    return result.uri;
   },
 
   joinPath(dir, filename) {
@@ -669,8 +686,10 @@ const Settings = {
           const result = await window.desktopAPI.saveZip(filename, data);
           if (result && result.filePath) savedPath = result.filePath;
         }
-      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem && dir) {
+      } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
         try {
+          const targetDir = dir || (await this.ensureCapacitorDir());
+          if (!targetDir) throw new Error('未选择备份目录');
           const dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
@@ -678,7 +697,7 @@ const Settings = {
             reader.readAsDataURL(blob);
           });
           const base64 = String(dataUrl).split(',')[1] || '';
-          const target = this.joinPath(dir, filename);
+          const target = this.joinPath(targetDir, filename);
           await window.Capacitor.Plugins.Filesystem.writeFile({ path: target, data: base64 });
           savedPath = target;
         } catch (e) {
@@ -704,6 +723,20 @@ const Settings = {
       await API.markExported();
       this.renderBackupInfo();
       this.showExportResult(filename, savedPath);
+    } catch (e) {
+      Toast.show(e.message, 'error');
+    }
+  },
+
+  async saveSpeedTiers() {
+    const body = {
+      speed_tier2_mb: parseFloat(document.getElementById('speed-tier2-mb').value) || 1,
+      speed_tier3_mb: parseFloat(document.getElementById('speed-tier3-mb').value) || 5,
+      speed_tier4_mb: parseFloat(document.getElementById('speed-tier4-mb').value) || 20
+    };
+    try {
+      await API.put('/api/settings', body);
+      Toast.show('AI 加速档位已保存', 'success');
     } catch (e) {
       Toast.show(e.message, 'error');
     }

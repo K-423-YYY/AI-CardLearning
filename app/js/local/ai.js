@@ -9,7 +9,9 @@
     '你是学习资料分析助手。请阅读用户上传的文字、Word 文档或图片资料，完整提取全部核心知识点，' +
     '不得遗漏文件中的任何知识点，也不能凭空增加文件里没有的内容。' +
     '把知识点按内容主题分成若干个区块，每个知识点只能属于一个区块。' +
-    '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}]}。' +
+    '如果内容包含选择题或判断题等客观题，请额外输出 "exam_questions" 数组，逐题原样保留题干和选项：{"type": "choice", "question": "原题题干", "options": ["A. 选项", "B. 选项", "C. 选项", "D. 选项"], "answer": "A", "explanation": "解析", "difficulty": "易或中或难"}。判断题 type 为 "judge"，选项为 ["正确", "错误"]。' +
+    '计算大题、主观题或普通资料不要输出 exam_questions，按原格式处理。' +
+    '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}], "exam_questions": [{"type": "choice", "question": "...", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": "A", "explanation": "...", "difficulty": "易或中或难"}]}。' +
     '不要输出 JSON 以外的任何文字。';
 
   const CARD_SYSTEM =
@@ -27,6 +29,25 @@
   const CARD_BATCH_SIZE = 5;
   const CHUNK_SIZE = 60000;
 
+  const SPEED_PROFILES = [
+    { multiplier: 1, analyzeConcurrency: 1, generateConcurrency: 1, cardBatchSize: 1 },
+    { multiplier: 5, analyzeConcurrency: 5, generateConcurrency: 5, cardBatchSize: 5 },
+    { multiplier: 10, analyzeConcurrency: 10, generateConcurrency: 10, cardBatchSize: 10 },
+    { multiplier: 20, analyzeConcurrency: 20, generateConcurrency: 20, cardBatchSize: 20 }
+  ];
+
+  function resolveSpeedProfile(settings, totalBytes) {
+    const mb = 1024 * 1024;
+    const t2 = Math.max(0.1, Number((settings && settings.speed_tier2_mb) || 1)) * mb;
+    const t3 = Math.max(t2 + 0.1, Number((settings && settings.speed_tier3_mb) || 5)) * mb;
+    const t4 = Math.max(t3 + 0.1, Number((settings && settings.speed_tier4_mb) || 20)) * mb;
+    let profile = SPEED_PROFILES[0];
+    if (totalBytes >= t4) profile = SPEED_PROFILES[3];
+    else if (totalBytes >= t3) profile = SPEED_PROFILES[2];
+    else if (totalBytes >= t2) profile = SPEED_PROFILES[1];
+    return profile;
+  }
+
   class AIError extends Error {
     constructor(message) {
       super(message);
@@ -43,6 +64,60 @@
   function normalizeDifficulty(value) {
     const text = String(value || '').trim();
     return text === '易' || text === '中' || text === '难' ? text : '中';
+  }
+
+  function hashCode(str) {
+    let h = 2166136261;
+    for (const ch of String(str || '')) {
+      h ^= ch.codePointAt(0);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function shuffleWithSeed(list, seedText) {
+    const arr = list.slice();
+    const rng = mulberry32(hashCode(seedText));
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  function examCardFromPoint(point, sortOrder) {
+    const options = (point.exam_options || []).map((item) => String(item).trim()).filter(Boolean);
+    const answerRaw = String(point.exam_answer || '').trim().toUpperCase();
+    let answerText = answerRaw;
+    if (/^[A-D]$/.test(answerRaw)) {
+      answerText = options['ABCD'.indexOf(answerRaw)] || options[0] || answerRaw;
+    } else {
+      answerText = options.find((option) => String(option).toUpperCase().includes(answerRaw)) || answerRaw;
+    }
+    const shuffled = shuffleWithSeed(options, `${point.title || point.exam_question}::${point.file_id || ''}::${sortOrder || 0}`);
+    const answerLetter = 'ABCD'[shuffled.indexOf(answerText)];
+    return {
+      question: String(point.exam_question || point.title || ''),
+      option_a: shuffled[0] || '',
+      option_b: shuffled[1] || '',
+      option_c: shuffled[2] || '',
+      option_d: shuffled[3] || '',
+      answer: answerLetter || 'A',
+      explanation: String(point.description || '原卷解析'),
+      label: '常考'
+    };
   }
 
   function parseCard(data) {
@@ -150,6 +225,22 @@
           }
         });
       });
+      (data && Array.isArray(data.exam_questions) ? data.exam_questions : []).forEach((question) => {
+        if (!question || !question.question) return;
+        const options = (question.options || []).map((item) => String(item).trim()).filter(Boolean);
+        if (options.length < 2) return;
+        result.push({
+          title: String(question.question),
+          description: String(question.explanation || ''),
+          block_name: question.type === 'judge' ? '试卷·判断题' : '试卷·选择题',
+          difficulty: normalizeDifficulty(question.difficulty || '中'),
+          file_id: fileId || null,
+          exam_type: question.type === 'judge' ? 'judge' : 'choice',
+          exam_question: String(question.question),
+          exam_options: options,
+          exam_answer: String(question.answer || '')
+        });
+      });
       return result;
     }
 
@@ -157,6 +248,8 @@
       const config = await core.getActiveAIConfig();
       const files = await core.getZoneSourceFiles(zoneId, fileIds);
       if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
+      const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+      const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
       const jobs = [];
       files.forEach((f) => {
         if (f.kind === 'image' || /^data:image\//.test(String(f.content || ''))) {
@@ -212,7 +305,7 @@
           if (onProgress) onProgress(done, jobs.length);
         }
       };
-      await Promise.all(Array.from({ length: Math.min(ANALYZE_CONCURRENCY, jobs.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(profile.analyzeConcurrency, jobs.length) }, worker));
       const result = [];
       merged.forEach((points) => result.push(...points));
       if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
@@ -222,6 +315,7 @@
     async function generateCards(zoneId, points, onProgress) {
       const config = await core.getActiveAIConfig();
       if (!points || !points.length) throw new AIError('请先执行分析并确认知识点');
+      const zoneFiles = await core.getZoneSourceFiles(zoneId);
       const flat = [];
       points.forEach((item) => {
         if (item && Array.isArray(item.points)) flat.push(...item.points);
@@ -235,25 +329,47 @@
               description: String(point.description || ''),
               block_name: String(point.block_name || '').trim(),
               difficulty: normalizeDifficulty(point.difficulty),
-              file_id: point.file_id ? Number(point.file_id) : undefined
+              file_id: point.file_id ? Number(point.file_id) : undefined,
+              exam_type: point.exam_type || '',
+              exam_question: point.exam_question || '',
+              exam_options: Array.isArray(point.exam_options) ? point.exam_options.slice() : [],
+              exam_answer: point.exam_answer || ''
             };
           }
-          return { title: String(point || '').trim(), description: '', block_name: '', difficulty: '中', file_id: undefined };
+          return {
+            title: String(point || '').trim(),
+            description: '',
+            block_name: '',
+            difficulty: '中',
+            file_id: undefined,
+            exam_type: '',
+            exam_question: '',
+            exam_options: [],
+            exam_answer: ''
+          };
         })
         .filter((p) => p.title);
+      const selectedFileIds = new Set(normalized.map((point) => point.file_id).filter(Boolean));
+      const totalBytes = zoneFiles
+        .filter((file) => (selectedFileIds.size ? selectedFileIds.has(file.id) : true))
+        .reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+      const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
       let generated = 0;
       const failed = [];
       let done = 0;
       const queue = [];
-      for (let i = 0; i < normalized.length; i += CARD_BATCH_SIZE) {
+      for (let i = 0; i < normalized.length; i += profile.cardBatchSize) {
         queue.push(
-          normalized.slice(i, i + CARD_BATCH_SIZE).map((point, offset) => ({
+          normalized.slice(i, i + profile.cardBatchSize).map((point, offset) => ({
             point,
             sortOrder: i + offset + 1
           }))
         );
       }
       const generateOne = async (item) => {
+        if (item.point.exam_options && item.point.exam_options.length >= 2) {
+          return core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder);
+        }
         const messages = [
           { role: 'system', content: CARD_SYSTEM },
           {
@@ -267,6 +383,13 @@
       };
       const generateBatch = async (batch) => {
         if (batch.length === 1) return generateOne(batch[0]);
+        if (batch.every((item) => item.point.exam_options && item.point.exam_options.length >= 2)) {
+          let added = 0;
+          for (const item of batch) {
+            if (await core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder)) added++;
+          }
+          return added;
+        }
         const itemsText = batch
           .map((item, idx) => `${idx + 1}. 知识点：${item.point.title}\n补充说明：${item.point.description}`)
           .join('\n\n');
@@ -310,7 +433,7 @@
           if (onProgress) onProgress(done, normalized.length);
         }
       };
-      await Promise.all(Array.from({ length: Math.min(GENERATE_CONCURRENCY, queue.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(profile.generateConcurrency, queue.length) }, worker));
       return { generated, failed, total: normalized.length };
     }
 

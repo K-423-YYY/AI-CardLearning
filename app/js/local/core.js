@@ -816,6 +816,9 @@
         backup_dir: s.backup_dir || '',
         backup_dir_uri: s.backup_dir_uri || '',
         backup_dir_label: s.backup_dir_label || '',
+        speed_tier2_mb: s.speed_tier2_mb || 1,
+        speed_tier3_mb: s.speed_tier3_mb || 5,
+        speed_tier4_mb: s.speed_tier4_mb || 20,
         providers: Object.entries(AI_PROVIDERS).map(([id, preset]) => ({
           id,
           name: preset.name,
@@ -844,6 +847,9 @@
       if (body.backup_dir !== undefined) s.backup_dir = String(body.backup_dir).trim();
       if (body.backup_dir_uri !== undefined) s.backup_dir_uri = String(body.backup_dir_uri).trim();
       if (body.backup_dir_label !== undefined) s.backup_dir_label = String(body.backup_dir_label).trim();
+      if (body.speed_tier2_mb !== undefined) s.speed_tier2_mb = Number(body.speed_tier2_mb) || 1;
+      if (body.speed_tier3_mb !== undefined) s.speed_tier3_mb = Number(body.speed_tier3_mb) || 5;
+      if (body.speed_tier4_mb !== undefined) s.speed_tier4_mb = Number(body.speed_tier4_mb) || 20;
       await db.put('settings', { id: 'profile', ...profile });
       await db.put('settings', { id: 'user_settings', ...s });
       await ensureDefaultProvider();
@@ -1025,7 +1031,8 @@
           filename: f.filename,
           content: f.content,
           kind: f.kind || 'text',
-          mime_type: f.mime_type || ''
+          mime_type: f.mime_type || '',
+          size: f.size || 0
         }));
     }
 
@@ -1169,6 +1176,7 @@
             content,
             kind: oldFile.kind || 'text',
             mime_type: oldFile.mime_type || '',
+            size: oldFile.size || 0,
             created_at: oldFile.created_at || nowStr()
           });
           fileMap.set(oldFile.id, newFile.id);
@@ -1384,7 +1392,12 @@
         return {
           zone: data,
           stats,
-          files: files.map((f) => ({ id: f.id, filename: f.filename, created_at: f.created_at, size: String(f.content || '').length }))
+          files: files.map((f) => ({
+            id: f.id,
+            filename: f.filename,
+            created_at: f.created_at,
+            size: f.size || String(f.content || '').length
+          }))
         };
       },
 
@@ -1435,6 +1448,7 @@
           content: fileData.content,
           kind: fileData.kind || 'text',
           mime_type: fileData.mime_type || '',
+          size: fileData.size || 0,
           created_at: now
         });
         const zone = await db.get('zones', zoneId);

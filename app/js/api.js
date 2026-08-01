@@ -98,7 +98,7 @@ async function readUploadFile(file) {
   if (!content) {
     throw new LocalCoreInstance.LocalError(4006, '文件中没有可读取的文本内容');
   }
-  return { filename, content, kind, mime_type: mimeType };
+  return { filename, content, kind, mime_type: mimeType, size: file.size };
 }
 
 let writeQueue = Promise.resolve();

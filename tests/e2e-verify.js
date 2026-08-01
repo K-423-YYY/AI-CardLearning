@@ -88,6 +88,7 @@ async function desktopLayoutCheck(browser) {
   await page.click('.sidebar-item[data-nav="settings"]');
   await page.waitForSelector('#btn-export-backup');
   await page.waitForSelector('#btn-choose-backup-dir');
+  await page.waitForSelector('#btn-save-speed-tiers');
   issues = await collectLayoutIssues(page);
   if (issues.length) throw new Error('desktop settings layout issues: ' + issues.join(' | '));
   await context.close();

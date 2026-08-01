@@ -270,7 +270,7 @@ const Zones = {
     regenerateBtn.disabled = true;
     resultEl.classList.add('hidden');
     resultEl.innerHTML = '';
-    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在分析选中的文件并整理知识区块，请稍候...</div>';
+    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在按当前加速档位分析选中的文件并整理知识区块，请稍候...</div>';
 
     try {
       const data = await API.post(`/api/zones/${zoneId}/analyze`, { file_ids: fileIds });

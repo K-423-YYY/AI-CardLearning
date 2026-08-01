@@ -1,4 +1,5 @@
 import json
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,7 +17,9 @@ ANALYZE_SYSTEM = (
     "你是学习资料分析助手。请阅读用户上传的文字、Word 文档或图片资料，完整提取全部核心知识点，"
     "不得遗漏文件中的任何知识点，也不能凭空增加文件里没有的内容。"
     "把知识点按内容主题分成若干个区块，每个知识点只能属于一个区块。"
-    '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}]}。'
+    '如果内容包含选择题或判断题等客观题，请额外输出 "exam_questions" 数组，逐题原样保留题干和选项：{"type": "choice", "question": "原题题干", "options": ["A. 选项", "B. 选项", "C. 选项", "D. 选项"], "answer": "A", "explanation": "解析", "difficulty": "易或中或难"}。判断题 type 为 "judge"，选项为 ["正确", "错误"]。'
+    '计算大题、主观题或普通资料不要输出 exam_questions，按原格式处理。'
+    '只输出一个 JSON 对象，格式：{"blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}], "exam_questions": [{"type": "choice", "question": "...", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": "A", "explanation": "...", "difficulty": "易或中或难"}]}。'
     "不要输出 JSON 以外的任何文字。"
 )
 
@@ -211,6 +214,25 @@ def _parse_analysis(data, file_id: int) -> list[dict]:
                         "file_id": file_id,
                     }
                 )
+    for question in data.get("exam_questions") or []:
+        if not isinstance(question, dict) or not question.get("question"):
+            continue
+        options = [str(option).strip() for option in (question.get("options") or []) if str(option).strip()]
+        if len(options) < 2:
+            continue
+        result.append(
+            {
+                "title": str(question["question"]),
+                "description": str(question.get("explanation", "")),
+                "block_name": "试卷·判断题" if question.get("type") == "judge" else "试卷·选择题",
+                "difficulty": _normalize_difficulty(question.get("difficulty", "中")),
+                "file_id": file_id,
+                "exam_type": "judge" if question.get("type") == "judge" else "choice",
+                "exam_question": str(question["question"]),
+                "exam_options": options,
+                "exam_answer": str(question.get("answer", "")),
+            }
+        )
     return result
 
 
@@ -305,6 +327,34 @@ def _parse_card(data: dict) -> dict:
     }
 
 
+def _exam_card_from_point(point: dict) -> dict:
+    options = [str(option).strip() for option in (point.get("exam_options") or []) if str(option).strip()]
+    answer_raw = str(point.get("exam_answer") or "").strip().upper()
+    if answer_raw in ("A", "B", "C", "D") and len(options) > "ABCD".index(answer_raw):
+        answer_text = options["ABCD".index(answer_raw)]
+    else:
+        answer_text = next(
+            (option for option in options if answer_raw and answer_raw in str(option).upper()),
+            answer_raw,
+        )
+    rng = random.Random(f"{point.get('title') or point.get('exam_question')}::{point.get('file_id')}")
+    shuffled = options[:]
+    rng.shuffle(shuffled)
+    answer_letter = "ABCD"[shuffled.index(answer_text)] if answer_text in shuffled else "A"
+    while len(shuffled) < 4:
+        shuffled.append("")
+    return {
+        "question": str(point.get("exam_question") or point.get("title") or ""),
+        "option_a": shuffled[0],
+        "option_b": shuffled[1],
+        "option_c": shuffled[2],
+        "option_d": shuffled[3],
+        "answer": answer_letter,
+        "explanation": str(point.get("description") or "原卷解析"),
+        "label": "常考",
+    }
+
+
 def _generate_one_card(api_key: str, base_url: str, model: str, title: str, description: str) -> dict:
     user_content = f"知识点：{title}\n补充说明：{description}\n请生成一道选择题。"
     messages = [
@@ -316,6 +366,8 @@ def _generate_one_card(api_key: str, base_url: str, model: str, title: str, desc
 
 
 def _generate_batch_cards(api_key: str, base_url: str, model: str, items: list[dict]) -> list[dict]:
+    if all(item.get("exam_options") for item in items):
+        return [_exam_card_from_point(item) for item in items]
     if len(items) == 1:
         return [_generate_one_card(api_key, base_url, model, items[0]["title"], items[0]["description"])]
     lines = []
@@ -366,11 +418,27 @@ def generate_cards(user_id: int, zone_id: int, points: list[str]) -> dict:
                         "block_name": str(point.get("block_name", "")).strip(),
                         "difficulty": _normalize_difficulty(point.get("difficulty", "中")),
                         "file_id": point.get("file_id") if point.get("file_id") in file_ids else default_file_id,
+                        "exam_type": point.get("exam_type", ""),
+                        "exam_question": point.get("exam_question", ""),
+                        "exam_options": list(point.get("exam_options") or []),
+                        "exam_answer": point.get("exam_answer", ""),
                     }
                 )
             else:
                 title = str(point).strip()
-                normalized.append({"title": title, "description": "", "block_name": "", "difficulty": "中", "file_id": default_file_id})
+                normalized.append(
+                    {
+                        "title": title,
+                        "description": "",
+                        "block_name": "",
+                        "difficulty": "中",
+                        "file_id": default_file_id,
+                        "exam_type": "",
+                        "exam_question": "",
+                        "exam_options": [],
+                        "exam_answer": "",
+                    }
+                )
 
         indexed = [(idx, point) for idx, point in enumerate(normalized) if point["title"]]
         batches = [indexed[i : i + CARD_BATCH_SIZE] for i in range(0, len(indexed), CARD_BATCH_SIZE)]
