@@ -109,6 +109,59 @@ async function toastAutoHideCheck(browser) {
   await context.close();
 }
 
+async function levelCompletionCheck(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(async () => {
+    const zone = await LocalCoreInstance.createZone('关卡完成测试');
+    const zid = zone.id;
+    await LocalCoreInstance.updateZoneSettings(zid, { daily_card_limit: 2 });
+    await LocalCoreInstance.addFile(zid, { filename: 'level.txt', content: '关卡内容' });
+    for (let i = 1; i <= 4; i++) {
+      await LocalCoreInstance.generateCard(
+        zid,
+        { title: '关卡知识点' + i, block_name: '区块', difficulty: '中' },
+        {
+          question: '题干' + i,
+          option_a: 'A选项',
+          option_b: 'B选项',
+          option_c: 'C选项',
+          option_d: 'D选项',
+          answer: 'A',
+          explanation: '解析',
+          label: '常考'
+        },
+        i
+      );
+    }
+    await LocalCoreInstance.rebuildZoneLevels(zid);
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('.zone-card');
+  await page.waitForSelector('.level-node-wrap[data-level="1"]');
+  await page.click('.level-node-wrap[data-level="1"]');
+  await page.waitForSelector('.quiz-option');
+  for (let i = 0; i < 2; i++) {
+    const answer = await page.evaluate(() => Cards.cards[Cards.currentIndex].answer);
+    await page.click(`.quiz-option[data-letter="${answer}"]`);
+    await page.waitForSelector('#btn-next.show');
+    await page.click('#btn-next');
+    if (i === 0) await page.waitForSelector('.quiz-option');
+  }
+  await page.waitForSelector('#learn-done:not(.hidden)');
+  await page.click('#btn-back-home-done');
+  await page.waitForSelector('.level-node-wrap');
+  const states = await page.$$eval('.level-node-wrap', (els) => els.map((el) => `${el.className}:${el.dataset.level}`));
+  if (!states.some((s) => s.startsWith('level-node-wrap done:1'))) {
+    throw new Error('completed level 1 is not marked done: ' + states.join(' | '));
+  }
+  if (!states.some((s) => s.startsWith('level-node-wrap current:2'))) {
+    throw new Error('next level 2 is not unlocked: ' + states.join(' | '));
+  }
+  await context.close();
+}
+
 async function offlineCheck(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
@@ -175,6 +228,7 @@ async function main() {
     await mobileLayoutCheck(browser);
     await desktopLayoutCheck(browser);
     await toastAutoHideCheck(browser);
+    await levelCompletionCheck(browser);
     await offlineCheck(browser);
     await exportDownloadCheck(browser);
     await sampleImportCheck(browser);

@@ -14,6 +14,7 @@ const SHOT_DIR = path.join(__dirname, '..', 'docs', 'screenshots');
 async function newPage(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
+  await page.route('https://api.github.com/**', (route) => route.fulfill({ status: 204, body: '' }));
   const errors = [];
   page.on('pageerror', (err) => errors.push('pageerror: ' + err.message));
   page.on('console', (msg) => {

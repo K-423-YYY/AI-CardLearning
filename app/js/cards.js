@@ -11,6 +11,15 @@ const Cards = {
   mode: 'daily',
   levelNo: null,
 
+  async refreshProgressAndNavigate(route, zoneId, ...args) {
+    try {
+      await API.get(`/api/zones/${zoneId}/progress`);
+    } catch (e) {
+      // progress refresh is best-effort
+    }
+    App.navigate(route, zoneId, ...args);
+  },
+
   // Render a specific level from the Duolingo-style path
   async renderLevel(zoneId, levelNo) {
     this.currentZoneId = zoneId;
@@ -251,14 +260,14 @@ const Cards = {
     const backBtn = document.getElementById('btn-back-home-done');
     const nextBtn = document.getElementById('btn-next-level');
     nextBtn.classList.add('hidden');
+    backBtn.textContent = '返回路径';
+    backBtn.onclick = () => this.refreshProgressAndNavigate('zone', this.currentZoneId);
 
     if (this.mode === 'wrong') {
       document.getElementById('done-title').textContent = this.totalCount === 0 ? '暂无错题' : '错题复习完成！';
       document.getElementById('done-msg').textContent = this.totalCount === 0
         ? '先去闯关积累错题，再回来复习吧~'
         : '本次错题已全部练完，继续保持！';
-      backBtn.textContent = '返回路径';
-      backBtn.onclick = () => App.navigate('zone', this.currentZoneId);
       return;
     }
 
@@ -274,8 +283,6 @@ const Cards = {
     if (this.mode === 'replay') {
       document.getElementById('done-title').textContent = '本关练习完成！';
       document.getElementById('done-msg').textContent = '随时可以回到路径继续闯关';
-      backBtn.textContent = '返回路径';
-      backBtn.onclick = () => App.navigate('zone', this.currentZoneId);
       return;
     }
 
@@ -283,11 +290,9 @@ const Cards = {
     document.getElementById('done-msg').textContent = progress && progress.checked_today
       ? `打卡成功！连续打卡 ${progress.streak} 天`
       : '今日任务已完成，继续保持！';
-    backBtn.textContent = '返回路径';
-    backBtn.onclick = () => App.navigate('zone', this.currentZoneId);
     if (hasMore) {
       nextBtn.classList.remove('hidden');
-      nextBtn.onclick = () => App.navigate('learn', this.currentZoneId);
+      nextBtn.onclick = () => this.refreshProgressAndNavigate('learn', this.currentZoneId);
     }
   },
 

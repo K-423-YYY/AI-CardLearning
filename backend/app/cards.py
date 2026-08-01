@@ -515,7 +515,7 @@ def submit_answer(card_id: int, body: AnswerRequest, user: dict = Depends(get_cu
                                 "UPDATE learning_zones SET status = '已完成', updated_at = ? WHERE id = ?",
                                 (now, card["zone_id"]),
                             )
-                        _sync_level_statuses(conn, user["id"], card["zone_id"], date_str, now)
+                _sync_level_statuses(conn, user["id"], card["zone_id"], date_str, now)
             else:
                 if not replay:
                     conn.execute("UPDATE cards SET wrong_count = wrong_count + 1 WHERE id = ?", (card_id,))

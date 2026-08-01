@@ -1663,9 +1663,9 @@
                 zone.updated_at = now;
                 await db.put('zones', zone);
               }
-              await syncLevelStatuses(zoneId, dateStr, now);
             }
           }
+          await syncLevelStatuses(zoneId, dateStr, now);
         } else {
           if (!replay) {
             card.wrong_count = wrongCount + 1;
