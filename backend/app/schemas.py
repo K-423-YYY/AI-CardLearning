@@ -43,6 +43,10 @@ class LevelLayoutRequest(BaseModel):
     level_count: int = Field(..., ge=1, le=200)
 
 
+class AnalyzeRequest(BaseModel):
+    file_ids: Optional[list[int]] = None
+
+
 class GenerateRequest(BaseModel):
     knowledge_points: Optional[list[str]] = None
     blocks: Optional[list[dict]] = None

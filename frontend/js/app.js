@@ -37,7 +37,7 @@ const Toast = {
     el.textContent = msg;
     el.className = 'toast-global show ' + (type || '');
     clearTimeout(el._tid);
-    el._tid = setTimeout(() => el.classList.remove('show'), 2500);
+    el._tid = setTimeout(() => el.classList.remove('show'), 3000);
   }
 };
 

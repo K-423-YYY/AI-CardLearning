@@ -1009,9 +1009,10 @@
       return { api_key: apiKey, base_url: baseUrl, model };
     }
 
-    async function getZoneSourceFiles(zoneId) {
+    async function getZoneSourceFiles(zoneId, fileIds) {
       await getZone(zoneId);
-      return (await db.where('files', (f) => f.zone_id === zoneId))
+      const ids = fileIds && fileIds.length ? new Set(fileIds.map(Number)) : null;
+      return (await db.where('files', (f) => f.zone_id === zoneId && (!ids || ids.has(f.id))))
         .sort((a, b) => a.id - b.id)
         .map((f) => ({ id: f.id, filename: f.filename, content: f.content }));
     }
@@ -1030,7 +1031,9 @@
       const files = await db.where('files', (f) => f.zone_id === zoneId);
       files.sort((a, b) => a.id - b.id);
       if (!files.length) throw new LocalError(4000, '学习区还没有文件，请先上传文件');
-      const fileId = files[0].id;
+      const wantedId = point && point.file_id ? Number(point.file_id) : files[0].id;
+      const file = files.find((f) => f.id === wantedId) || files[0];
+      const fileId = file.id;
       const title = String(point.title || '').trim();
       const question = String(cardData.question || '').trim();
       if (!title || !question) return false;

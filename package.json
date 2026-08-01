@@ -1,10 +1,10 @@
 {
   "name": "ai-learn-local",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "private": true,
   "description": "AI 闯关学习 · 本地开源版",
   "scripts": {
-    "test": "node --test tests/core.test.js",
+    "test": "node --test tests/core.test.js tests/ai-local.test.js",
     "serve": "python serve.py"
   }
 }

@@ -1,6 +1,7 @@
 ﻿// Zones module - learning zone CRUD + file upload + AI analyze + card generation
 const Zones = {
   currentZoneId: null,
+  pendingAnalyzeFileIds: null,
 
   // --- Home page: list all zones ---
   async renderHome() {
@@ -163,16 +164,53 @@ const Zones = {
       confirmBtn.disabled = true;
       confirmBtn.textContent = '上传中...';
       let saved = 0;
+      const savedIds = [];
       for (const file of files) {
         try {
-          await API.upload(`/api/zones/${zoneId}/files`, file);
+          const res = await API.upload(`/api/zones/${zoneId}/files`, file);
           saved++;
+          if (res && res.id) savedIds.push(res.id);
         } catch (e) {
           Toast.show(e.message, 'error');
         }
       }
       if (saved > 0) Toast.show(`已保存 ${saved} 个文件`, 'success');
+      if (saved > 0) {
+        this.pendingAnalyzeFileIds = savedIds;
+        this.showAnalyzePrompt(zoneId);
+      } else {
+        App.navigate('zone', zoneId);
+      }
+    };
+  },
+
+  showAnalyzePrompt(zoneId) {
+    const modal = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    box.innerHTML = `
+      <h3>文件已上传</h3>
+      <p style="font-size:0.9rem;color:#64748b;margin-bottom:16px;">是否立即进行 AI 分析并生成知识卡片？</p>
+      <div class="modal-actions">
+        <button class="btn btn-outline btn-sm" id="modal-cancel">稍后分析</button>
+        <button class="btn btn-primary btn-sm" id="modal-confirm">立即分析</button>
+      </div>
+    `;
+    modal.classList.remove('hidden');
+    document.getElementById('modal-cancel').onclick = () => {
+      modal.classList.add('hidden');
+      this.pendingAnalyzeFileIds = null;
       App.navigate('zone', zoneId);
+    };
+    document.getElementById('modal-confirm').onclick = () => {
+      modal.classList.add('hidden');
+      App.navigate('ai', zoneId);
+    };
+    modal.onclick = (e) => {
+      if (e.target === modal) {
+        modal.classList.add('hidden');
+        this.pendingAnalyzeFileIds = null;
+        App.navigate('zone', zoneId);
+      }
     };
   },
 
@@ -190,6 +228,31 @@ const Zones = {
     document.querySelectorAll('input[name="replace-old"]').forEach(radio => {
       radio.addEventListener('change', () => this.toggleAiSelect());
     });
+    await this.loadAiFiles(zoneId);
+  },
+
+  async loadAiFiles(zoneId) {
+    const listEl = document.getElementById('ai-file-list');
+    if (!listEl) return;
+    try {
+      const data = await API.get(`/api/zones/${zoneId}`);
+      const files = data.files || [];
+      const pendingSet = new Set((this.pendingAnalyzeFileIds || []).map(Number));
+      this.pendingAnalyzeFileIds = null;
+      if (!files.length) {
+        listEl.innerHTML = '<div class="ai-select-empty">当前没有文件，请先上传文件</div>';
+        return;
+      }
+      listEl.innerHTML = files.map(f => `
+        <label class="ai-select-item">
+          <input type="checkbox" class="ai-file-check" data-id="${f.id}" ${pendingSet.size ? (pendingSet.has(f.id) ? 'checked' : '') : 'checked'}>
+          <span class="ai-select-title">${Utils.esc(f.filename)}</span>
+          <span class="ai-select-meta">${Utils.formatSize(f.size)}</span>
+        </label>
+      `).join('');
+    } catch (e) {
+      listEl.innerHTML = `<div class="ai-select-empty">${Utils.esc(e.message)}</div>`;
+    }
   },
 
   toggleAiSelect() {
@@ -227,15 +290,21 @@ const Zones = {
     const regenerateBtn = document.getElementById('btn-ai-regenerate');
     const confirmBtn = document.getElementById('btn-ai-confirm');
     const progressWrap = document.getElementById('ai-analyze-progress');
+    const fileIds = Array.from(document.querySelectorAll('.ai-file-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
+    if (!fileIds.length) {
+      Toast.show('请至少选择一个文件', 'error');
+      return;
+    }
     analyzeBtn.disabled = true;
     regenerateBtn.disabled = true;
     resultEl.classList.add('hidden');
     resultEl.innerHTML = '';
-    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在分析文件并整理知识区块，请稍候...</div>';
+    chat.innerHTML += '<div class="ai-msg ai-msg-bot">正在分析选中的文件并整理知识区块，请稍候...</div>';
     if (progressWrap) progressWrap.classList.remove('hidden');
 
     try {
       const data = await API.post(`/api/zones/${zoneId}/analyze`, {
+        file_ids: fileIds,
         onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total)
       });
       this.aiPoints = data.knowledge_points || [];

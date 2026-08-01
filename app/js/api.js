@@ -109,7 +109,10 @@ const LocalAPI = {
             return LocalCoreInstance.addFile(zoneId, data);
           }
           if (sub === 'analyze' && method === 'POST') {
-            return { knowledge_points: await LocalAIInstance.analyzeZone(zoneId, body && body.onProgress) };
+            const fileIds = (body && body.file_ids) || [];
+            return {
+              knowledge_points: await LocalAIInstance.analyzeZone(zoneId, body && body.onProgress, fileIds)
+            };
           }
           if (sub === 'generate' && method === 'POST') {
             const replaceOld = (body && body.replace_old) || 'none';

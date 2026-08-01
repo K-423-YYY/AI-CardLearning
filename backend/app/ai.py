@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
 from datetime import datetime
 
@@ -24,6 +25,17 @@ CARD_SYSTEM = (
     '只输出一个 JSON 对象，格式：{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}。'
     "answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。"
 )
+
+CARD_BATCH_SYSTEM = (
+    "你是出题助手。根据给定的多个知识点，为每个知识点生成一道四选一选择题。"
+    '只输出一个 JSON 对象，格式：{"cards": [{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}]}。'
+    "cards 的数量必须与提供的知识点数量一致，顺序保持一致。answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。"
+)
+
+ANALYZE_CONCURRENCY = 5
+GENERATE_CONCURRENCY = 5
+CARD_BATCH_SIZE = 5
+CHUNK_SIZE = 60000
 
 
 class AIError(Exception):
@@ -164,25 +176,21 @@ def test_connection(
     raise AIError(f"直连和代理连接均失败：{last_error}")
 
 
-def analyze_zone(user_id: int, zone_id: int) -> list[dict]:
-    with closing(get_connection()) as conn:
-        api_key, base_url, model = _load_ai_config(conn, user_id)
-        files = conn.execute(
-            "SELECT id, filename, content FROM files WHERE zone_id = ? ORDER BY id", (zone_id,)
-        ).fetchall()
-        if not files:
-            raise AIError("学习区还没有文件，请先上传文件")
-        parts = []
-        for f in files:
-            text = (f["content"] or "")[:60000]
-            parts.append(f"文件《{f['filename']}》：\n{text}")
-        payload = "\n\n".join(parts)[:200000]
+def _split_text(text: str, size: int) -> list[str]:
+    chunks = []
+    current = ""
+    for line in str(text or "").split("\n"):
+        if current and len(current) + len(line) + 1 > size:
+            chunks.append(current)
+            current = line
+        else:
+            current += ("\n" if current else "") + line
+    if current:
+        chunks.append(current)
+    return chunks
 
-    messages = [
-        {"role": "system", "content": ANALYZE_SYSTEM},
-        {"role": "user", "content": payload},
-    ]
-    data = _chat_json(api_key, base_url, model, messages)
+
+def _parse_analysis(data, file_id: int) -> list[dict]:
     data = data if isinstance(data, dict) else {}
     blocks = data.get("blocks") or []
     if not blocks and data.get("knowledge_points"):
@@ -200,8 +208,57 @@ def analyze_zone(user_id: int, zone_id: int) -> list[dict]:
                         "description": str(point.get("description", "")),
                         "block_name": block_name,
                         "difficulty": _normalize_difficulty(point.get("difficulty", "中")),
+                        "file_id": file_id,
                     }
                 )
+    return result
+
+
+def analyze_zone(user_id: int, zone_id: int, file_ids: list[int] | None = None) -> list[dict]:
+    with closing(get_connection()) as conn:
+        api_key, base_url, model = _load_ai_config(conn, user_id)
+        if file_ids:
+            placeholders = ",".join("?" * len(file_ids))
+            files = conn.execute(
+                f"SELECT id, filename, content FROM files WHERE zone_id = ? AND id IN ({placeholders}) ORDER BY id",
+                [zone_id, *file_ids],
+            ).fetchall()
+        else:
+            files = conn.execute(
+                "SELECT id, filename, content FROM files WHERE zone_id = ? ORDER BY id", (zone_id,)
+            ).fetchall()
+        if not files:
+            raise AIError("学习区还没有文件，请先上传文件")
+        jobs = []
+        for f in files:
+            text = (f["content"] or "")[:CHUNK_SIZE]
+            content = f"文件《{f['filename']}》：\n{text}"
+            for chunk in _split_text(content, CHUNK_SIZE):
+                jobs.append((chunk, f["id"]))
+
+    def analyze_one(content: str, file_id: int) -> list[dict]:
+        messages = [
+            {"role": "system", "content": ANALYZE_SYSTEM},
+            {"role": "user", "content": content},
+        ]
+        data = _chat_json(api_key, base_url, model, messages)
+        return _parse_analysis(data, file_id)
+
+    if len(jobs) == 1:
+        result = analyze_one(jobs[0][0], jobs[0][1])
+    else:
+        merged = {}
+        seen = set()
+        with ThreadPoolExecutor(max_workers=ANALYZE_CONCURRENCY) as pool:
+            future_map = {pool.submit(analyze_one, content, file_id): file_id for content, file_id in jobs}
+            for future in as_completed(future_map):
+                for point in future.result():
+                    key = f"{point['block_name']}::{point['title']}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.setdefault(point["block_name"], []).append(point)
+        result = [point for points in merged.values() for point in points]
     if not result:
         raise AIError("AI 未能识别出知识点，请重试")
     return result
@@ -244,15 +301,36 @@ def _generate_one_card(api_key: str, base_url: str, model: str, title: str, desc
     return _parse_card(data)
 
 
+def _generate_batch_cards(api_key: str, base_url: str, model: str, items: list[dict]) -> list[dict]:
+    if len(items) == 1:
+        return [_generate_one_card(api_key, base_url, model, items[0]["title"], items[0]["description"])]
+    lines = []
+    for idx, item in enumerate(items, start=1):
+        lines.append(f"{idx}. 知识点：{item['title']}\n补充说明：{item['description']}")
+    messages = [
+        {"role": "system", "content": CARD_BATCH_SYSTEM},
+        {"role": "user", "content": f"请按顺序为下面 {len(items)} 个知识点生成选择题：\n\n" + "\n\n".join(lines)},
+    ]
+    data = _chat_json(api_key, base_url, model, messages, timeout=config.AI_TIMEOUT_SECONDS + 150)
+    if isinstance(data, list):
+        raw_cards = data
+    elif isinstance(data, dict):
+        raw_cards = data.get("cards") or []
+    else:
+        raw_cards = []
+    if not isinstance(raw_cards, list) or len(raw_cards) != len(items):
+        raise AIError(f"批量返回的卡片数量不完整（期望 {len(items)}，实际 {len(raw_cards)}）")
+    return [_parse_card(card) for card in raw_cards]
+
+
 def generate_cards(user_id: int, zone_id: int, points: list[str]) -> dict:
     with closing(get_connection()) as conn:
         api_key, base_url, model = _load_ai_config(conn, user_id)
-        first_file = conn.execute(
-            "SELECT id FROM files WHERE zone_id = ? ORDER BY id LIMIT 1", (zone_id,)
-        ).fetchone()
-        if first_file is None:
+        files = conn.execute("SELECT id FROM files WHERE zone_id = ? ORDER BY id", (zone_id,)).fetchall()
+        if not files:
             raise AIError("学习区还没有文件，请先上传文件")
-        file_id = first_file["id"]
+        file_ids = [row["id"] for row in files]
+        default_file_id = file_ids[0]
         if not points:
             raise AIError("请先执行分析并确认知识点")
 
@@ -273,26 +351,56 @@ def generate_cards(user_id: int, zone_id: int, points: list[str]) -> dict:
                         "description": str(point.get("description", "")),
                         "block_name": str(point.get("block_name", "")).strip(),
                         "difficulty": _normalize_difficulty(point.get("difficulty", "中")),
+                        "file_id": point.get("file_id") if point.get("file_id") in file_ids else default_file_id,
                     }
                 )
             else:
                 title = str(point).strip()
-                normalized.append({"title": title, "description": "", "block_name": "", "difficulty": "中"})
+                normalized.append({"title": title, "description": "", "block_name": "", "difficulty": "中", "file_id": default_file_id})
+
+        indexed = [(idx, point) for idx, point in enumerate(normalized) if point["title"]]
+        batches = [indexed[i : i + CARD_BATCH_SIZE] for i in range(0, len(indexed), CARD_BATCH_SIZE)]
+        card_results = {}
+        failed = []
+
+        with ThreadPoolExecutor(max_workers=GENERATE_CONCURRENCY) as pool:
+            future_map = {}
+            for batch in batches:
+                future = pool.submit(
+                    _generate_batch_cards,
+                    api_key,
+                    base_url,
+                    model,
+                    [point for _, point in batch],
+                )
+                future_map[future] = batch
+            for future in as_completed(future_map):
+                batch = future_map[future]
+                try:
+                    cards = future.result()
+                    for (idx, point), card in zip(batch, cards):
+                        card_results[idx] = (point, card)
+                except AIError:
+                    for idx, point in batch:
+                        try:
+                            card = _generate_one_card(
+                                api_key,
+                                base_url,
+                                model,
+                                point["title"],
+                                point["description"],
+                            )
+                            card_results[idx] = (point, card)
+                        except AIError as exc:
+                            failed.append({"title": point["title"], "error": str(exc)})
 
         generated = 0
-        failed = []
-        for index, point in enumerate(normalized, start=1):
-            title = point["title"]
-            if not title:
-                continue
-            try:
-                card = _generate_one_card(api_key, base_url, model, title, point["description"])
-            except AIError as exc:
-                failed.append({"title": title, "error": str(exc)})
-                continue
+        for idx in sorted(card_results):
+            point, card = card_results[idx]
+            file_id = point["file_id"]
             duplicate = conn.execute(
                 "SELECT id FROM cards WHERE file_id = ? AND title = ? AND question = ?",
-                (file_id, title, card["question"]),
+                (file_id, point["title"], card["question"]),
             ).fetchone()
             if duplicate is not None:
                 continue
@@ -301,7 +409,7 @@ def generate_cards(user_id: int, zone_id: int, points: list[str]) -> dict:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待学', 0, ?)""",
                 (
                     file_id,
-                    title,
+                    point["title"],
                     card["question"],
                     card["option_a"],
                     card["option_b"],
@@ -312,7 +420,7 @@ def generate_cards(user_id: int, zone_id: int, points: list[str]) -> dict:
                     card["label"],
                     point["block_name"],
                     point["difficulty"],
-                    index,
+                    idx + 1,
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )

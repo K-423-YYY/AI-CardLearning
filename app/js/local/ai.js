@@ -17,6 +17,16 @@
     '只输出一个 JSON 对象，格式：{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}。' +
     'answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。';
 
+  const CARD_BATCH_SYSTEM =
+    '你是出题助手。根据给定的多个知识点，为每个知识点生成一道四选一选择题。' +
+    '只输出一个 JSON 对象，格式：{"cards": [{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}]}。' +
+    'cards 的数量必须与提供的知识点数量一致，顺序保持一致。answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。';
+
+  const ANALYZE_CONCURRENCY = 5;
+  const GENERATE_CONCURRENCY = 5;
+  const CARD_BATCH_SIZE = 5;
+  const CHUNK_SIZE = 60000;
+
   class AIError extends Error {
     constructor(message) {
       super(message);
@@ -119,7 +129,7 @@
       return result;
     }
 
-    function parseBlocks(data) {
+    function parseBlocks(data, fileId) {
       const blocks = (data && data.blocks) || [];
       const result = [];
       if (blocks.length === 0 && data && data.knowledge_points) {
@@ -134,7 +144,8 @@
               title: String(point.title),
               description: String(point.description || ''),
               block_name: blockName,
-              difficulty: normalizeDifficulty(point.difficulty)
+              difficulty: normalizeDifficulty(point.difficulty),
+              file_id: fileId || null
             });
           }
         });
@@ -142,36 +153,41 @@
       return result;
     }
 
-    async function analyzeZone(zoneId, onProgress) {
+    async function analyzeZone(zoneId, onProgress, fileIds) {
       const config = await core.getActiveAIConfig();
-      const files = await core.getZoneSourceFiles(zoneId);
+      const files = await core.getZoneSourceFiles(zoneId, fileIds);
       if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
-      const parts = files.map((f) => `文件《${f.filename}》：\n${String(f.content || '').slice(0, 60000)}`);
-      const payload = parts.join('\n\n').slice(0, 200000);
-      const analyze = async (content) => {
+      const jobs = [];
+      files.forEach((f) => {
+        const text = String(f.content || '').slice(0, CHUNK_SIZE);
+        const content = `文件《${f.filename}》：\n${text}`;
+        splitText(content, CHUNK_SIZE).forEach((chunk) => {
+          jobs.push({ chunk, fileId: f.id });
+        });
+      });
+      const analyze = async (content, fileId) => {
         const data = await chatJson(config.api_key, config.base_url, config.model, [
           { role: 'system', content: ANALYZE_SYSTEM },
           { role: 'user', content }
         ]);
-        return parseBlocks(data);
+        return parseBlocks(data, fileId);
       };
 
-      if (payload.length <= 80000) {
-        const result = await analyze(payload);
+      if (jobs.length === 1) {
+        const result = await analyze(jobs[0].chunk, jobs[0].fileId);
         if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
         if (onProgress) onProgress(1, 1);
         return result;
       }
 
-      const chunks = splitText(payload, 60000);
-      const queue = chunks.slice();
+      const queue = jobs.slice();
       const merged = new Map();
       const seen = new Set();
       let done = 0;
       const worker = async () => {
         while (queue.length) {
-          const chunk = queue.shift();
-          const points = await analyze(chunk);
+          const job = queue.shift();
+          const points = await analyze(job.chunk, job.fileId);
           points.forEach((p) => {
             const key = `${p.block_name}::${p.title}`;
             if (seen.has(key)) return;
@@ -180,10 +196,10 @@
             merged.get(p.block_name).push(p);
           });
           done++;
-          if (onProgress) onProgress(done, chunks.length);
+          if (onProgress) onProgress(done, jobs.length);
         }
       };
-      await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(ANALYZE_CONCURRENCY, jobs.length) }, worker));
       const result = [];
       merged.forEach((points) => result.push(...points));
       if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
@@ -205,40 +221,83 @@
               title: String(point.title || '').trim(),
               description: String(point.description || ''),
               block_name: String(point.block_name || '').trim(),
-              difficulty: normalizeDifficulty(point.difficulty)
+              difficulty: normalizeDifficulty(point.difficulty),
+              file_id: point.file_id ? Number(point.file_id) : undefined
             };
           }
-          return { title: String(point || '').trim(), description: '', block_name: '', difficulty: '中' };
+          return { title: String(point || '').trim(), description: '', block_name: '', difficulty: '中', file_id: undefined };
         })
         .filter((p) => p.title);
       let generated = 0;
       const failed = [];
       let done = 0;
-      const queue = normalized.map((point, i) => ({ point, i }));
+      const queue = [];
+      for (let i = 0; i < normalized.length; i += CARD_BATCH_SIZE) {
+        queue.push(
+          normalized.slice(i, i + CARD_BATCH_SIZE).map((point, offset) => ({
+            point,
+            sortOrder: i + offset + 1
+          }))
+        );
+      }
+      const generateOne = async (item) => {
+        const messages = [
+          { role: 'system', content: CARD_SYSTEM },
+          {
+            role: 'user',
+            content: `知识点：${item.point.title}\n补充说明：${item.point.description}\n请生成一道选择题。`
+          }
+        ];
+        const data = await chatJson(config.api_key, config.base_url, config.model, messages, 150000);
+        const card = parseCard(data);
+        return core.generateCard(zoneId, item.point, card, item.sortOrder);
+      };
+      const generateBatch = async (batch) => {
+        if (batch.length === 1) return generateOne(batch[0]);
+        const itemsText = batch
+          .map((item, idx) => `${idx + 1}. 知识点：${item.point.title}\n补充说明：${item.point.description}`)
+          .join('\n\n');
+        const messages = [
+          { role: 'system', content: CARD_BATCH_SYSTEM },
+          {
+            role: 'user',
+            content: `请按顺序为下面 ${batch.length} 个知识点生成选择题：\n\n${itemsText}`
+          }
+        ];
+        const data = await chatJson(config.api_key, config.base_url, config.model, messages, 240000);
+        const rawCards = Array.isArray(data) ? data : (data && Array.isArray(data.cards) ? data.cards : []);
+        if (rawCards.length !== batch.length) {
+          throw new AIError(`批量返回的卡片数量不完整（期望 ${batch.length}，实际 ${rawCards.length}）`);
+        }
+        const parsed = rawCards.map((cardData, idx) => ({
+          item: batch[idx],
+          card: parseCard(cardData)
+        }));
+        let added = 0;
+        for (const entry of parsed) {
+          if (await core.generateCard(zoneId, entry.item.point, entry.card, entry.item.sortOrder)) added++;
+        }
+        return added;
+      };
       const worker = async () => {
         while (queue.length) {
-          const item = queue.shift();
-          const point = item.point;
+          const batch = queue.shift();
           try {
-            const messages = [
-              { role: 'system', content: CARD_SYSTEM },
-              {
-                role: 'user',
-                content: `知识点：${point.title}\n补充说明：${point.description}\n请生成一道选择题。`
-              }
-            ];
-            const data = await chatJson(config.api_key, config.base_url, config.model, messages, 150000);
-            const card = parseCard(data);
-            const added = await core.generateCard(zoneId, point, card, item.i + 1);
-            if (added) generated++;
+            generated += await generateBatch(batch);
           } catch (err) {
-            failed.push({ title: point.title, error: err.message || String(err) });
+            for (const item of batch) {
+              try {
+                if (await generateOne(item)) generated++;
+              } catch (err2) {
+                failed.push({ title: item.point.title, error: err2.message || String(err2) });
+              }
+            }
           }
-          done++;
+          done += batch.length;
           if (onProgress) onProgress(done, normalized.length);
         }
       };
-      await Promise.all(Array.from({ length: Math.min(3, normalized.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(GENERATE_CONCURRENCY, queue.length) }, worker));
       return { generated, failed, total: normalized.length };
     }
 

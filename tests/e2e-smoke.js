@@ -57,6 +57,10 @@ async function mobileFlow(browser) {
     buffer: Buffer.from('Python 变量与类型\n函数定义\n类与对象\n', 'utf8')
   });
   await page.click('#btn-upload-confirm');
+  await page.waitForSelector('#modal-confirm');
+  await page.click('#modal-confirm');
+  await page.waitForSelector('.ai-file-check:checked');
+  await page.click('#btn-back-ai');
   await page.waitForSelector('.file-item');
 
   const zoneId = await page.evaluate(() => parseInt(location.hash.split('/')[1], 10));

@@ -1,7 +1,7 @@
 # Android 构建说明（Phase E）
 
 当前仓库已经准备好 Capacitor 配置，Android 工程会在首次构建时由 Capacitor 生成。
-当前 Release 安装包为 `app-debug.apk`（版本 `0.1.4`）。
+当前 Release 安装包为 `app-debug.apk`（版本 `0.1.5`）。
 
 ## 前置条件
 

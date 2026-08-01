@@ -92,6 +92,21 @@ async function desktopLayoutCheck(browser) {
   await context.close();
 }
 
+async function toastAutoHideCheck(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(() => Toast.show('自动消失测试', 'success'));
+  await page.waitForSelector('.toast-global.show');
+  await page.waitForTimeout(3500);
+  const stillVisible = await page.evaluate(() => {
+    const el = document.getElementById('toast');
+    return el.classList.contains('show') || getComputedStyle(el).opacity !== '0';
+  });
+  if (stillVisible) throw new Error('toast did not auto hide after 3 seconds');
+  await context.close();
+}
+
 async function offlineCheck(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
@@ -157,6 +172,7 @@ async function main() {
   try {
     await mobileLayoutCheck(browser);
     await desktopLayoutCheck(browser);
+    await toastAutoHideCheck(browser);
     await offlineCheck(browser);
     await exportDownloadCheck(browser);
     await sampleImportCheck(browser);

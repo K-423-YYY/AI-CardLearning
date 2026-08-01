@@ -381,6 +381,8 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .ai-import-control { display: flex; flex-direction: column; gap: 8px; }
 .ai-import-control label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #334155; cursor: pointer; }
 .ai-import-control input[type="radio"] { accent-color: #6366f1; width: 16px; height: 16px; }
+.ai-file-select { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 14px; border: 1px solid #e2e8f0; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04); }
+.ai-file-select .ai-select-item input { accent-color: #6366f1; }
 .ai-select-cards { margin-top: 12px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
 .ai-select-head { font-size: 0.78rem; font-weight: 700; color: #64748b; margin-bottom: 8px; }
 .ai-select-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
@@ -446,9 +448,10 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
   background: #1e293b; color: #fff; padding: 12px 24px; border-radius: 10px;
   font-size: 0.9rem; font-weight: 600; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-  transition: all 0.3s; max-width: 90vw; text-align: center;
+  transition: opacity 0.3s, transform 0.3s; max-width: 90vw; text-align: center;
+  opacity: 0; pointer-events: none;
 }
-.toast-global.show { opacity: 1; }
+.toast-global.show { opacity: 1; pointer-events: auto; }
 .toast-global.error { background: #ef4444; }
 .toast-global.success { background: #10b981; }
 

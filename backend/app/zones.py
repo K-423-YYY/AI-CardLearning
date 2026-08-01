@@ -10,7 +10,7 @@ from . import ai, config
 from .auth import get_current_user
 from .database import get_connection
 from .responses import fail, ok
-from .schemas import GenerateRequest, LevelLayoutRequest, ZoneCreate, ZoneSettingsUpdate
+from .schemas import AnalyzeRequest, GenerateRequest, LevelLayoutRequest, ZoneCreate, ZoneSettingsUpdate
 
 router = APIRouter(tags=["zones"])
 
@@ -605,12 +605,12 @@ def upload_file(zone_id: int, file: UploadFile = File(...), user: dict = Depends
 
 
 @router.post("/api/zones/{zone_id}/analyze")
-def analyze_zone(zone_id: int, user: dict = Depends(get_current_user)):
+def analyze_zone(zone_id: int, body: AnalyzeRequest = None, user: dict = Depends(get_current_user)):
     with closing(get_connection()) as conn:
         if _owned_zone(conn, zone_id, user["id"]) is None:
             return fail(4040, "学习区不存在", 404)
     try:
-        points = ai.analyze_zone(user["id"], zone_id)
+        points = ai.analyze_zone(user["id"], zone_id, body.file_ids if body else None)
     except ai.AIError as exc:
         return fail(4004 if "API Key" in str(exc) else 4005, str(exc), 400)
     return ok({"knowledge_points": points})
