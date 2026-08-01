@@ -5,7 +5,7 @@
 
 ## 前置条件
 
-- 安装 Node.js 18+ 与 Java 17+（推荐 Java 21）
+- 安装 Node.js 22+ 与 Java 17+（推荐 Java 21，Capacitor 8 要求 Node.js 22+）
 - 固定使用 Capacitor 8：`@capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor/filesystem@8`
 - 本地原生插件：`local-plugins/ailearn-directory-picker`，用于系统目录选择和 Storage Access Framework 写入
 - 安装 Android Studio，并配置 `ANDROID_HOME`
