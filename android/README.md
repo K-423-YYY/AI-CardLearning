@@ -1,10 +1,12 @@
 # Android 构建说明（Phase E）
 
 当前仓库已经准备好 Capacitor 配置，Android 工程会在首次构建时由 Capacitor 生成。
+当前 Release 安装包为 `app-debug.apk`（版本 `0.1.4`）。
 
 ## 前置条件
 
 - 安装 Node.js 18+ 与 Java 17+（推荐 Java 21）
+- 固定使用 Capacitor 6：`@capacitor/core@6 @capacitor/cli@6 @capacitor/android@6`
 - 安装 Android Studio，并配置 `ANDROID_HOME`
 - 在 `android/` 目录执行以下命令：
 
@@ -29,6 +31,7 @@ cd android
 - 数据全部保存在应用本机，不经过服务器。
 - 导出备份使用系统文件选择器，可保存到本地、网盘或云盘目录。
 - 卸载应用即清空数据，符合“删除即清空”的产品决策。
+- 覆盖安装新版不会清除本地数据；只有卸载应用才会清空。
 
 ## allowBackup
 
