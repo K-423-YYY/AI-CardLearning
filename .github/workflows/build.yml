@@ -40,16 +40,18 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - name: Show Java version
+        run: java -version
       - name: Generate Android project
         working-directory: android
         run: |
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap add android
           npx cap sync android
       - name: Build debug APK
         working-directory: android/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk

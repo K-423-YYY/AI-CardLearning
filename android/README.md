@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- 安装 Node.js 18+ 与 Java 21+
+- 安装 Node.js 18+ 与 Java 17+（推荐 Java 21）
 - 安装 Android Studio，并配置 `ANDROID_HOME`
 - 在 `android/` 目录执行以下命令：
 
