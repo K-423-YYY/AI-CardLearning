@@ -12,7 +12,7 @@
     const dataFile = zip.file('data.json');
     if (!manifestFile || !dataFile) throw new Error('不是有效的 AI 闯关学习备份文件');
     const manifest = JSON.parse(await manifestFile.async('string'));
-    if (manifest.format_version !== 1) {
+    if (manifest.format_version !== 1 && manifest.format_version !== 2) {
       throw new Error('备份格式版本不兼容，请升级应用后再导入');
     }
     const data = JSON.parse(await dataFile.async('string'));

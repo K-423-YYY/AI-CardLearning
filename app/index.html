@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=30">
+<link rel="stylesheet" href="./css/style.css?v=31">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -187,6 +187,13 @@
     <main class="main-content">
       <div class="zone-stats" id="zone-stats"></div>
       <div class="zone-progress" id="zone-progress"></div>
+      <div class="study-mode-row" id="study-mode-row">
+        <span>关卡学习模式</span>
+        <div class="study-mode-control">
+          <button class="study-mode-btn" data-mode="quiz">闯关卡</button>
+          <button class="study-mode-btn" data-mode="memory">记忆卡</button>
+        </div>
+      </div>
       
       <div class="section-header">
         <h3>文件</h3>
@@ -205,16 +212,12 @@
       </div>
       
       <div class="section-header">
-        <h3>卡片列表</h3>
+        <h3>卡片库</h3>
         <div class="header-actions">
-          <button class="btn btn-outline btn-sm" id="btn-cards" style="display:none">知识卡片</button>
           <button class="btn btn-outline btn-sm" id="btn-wrong" style="display:none">错题集</button>
         </div>
       </div>
-      <div id="card-list" class="card-list"></div>
-      <div id="card-empty" class="empty-state hidden">
-        <p>暂无卡片，请先上传文件并生成卡片</p>
-      </div>
+      <div id="library-panel" class="library-panel"></div>
       
       <div id="learn-result" class="learn-result hidden"></div>
     </main>
@@ -272,11 +275,25 @@
       <div style="width:40px"></div>
     </header>
     <main class="main-content">
+      <div class="ai-mode-select">
+        <label>生成方式</label>
+        <div class="ai-mode-control">
+          <button class="ai-mode-btn active" data-mode="quick">快速生成</button>
+          <button class="ai-mode-btn" data-mode="refine">四阶段精炼</button>
+        </div>
+      </div>
       <div class="ai-chat" id="ai-chat">
         <div class="ai-msg ai-msg-bot">我会阅读学习区里的文件，把全部知识点按区块整理出来，每一条知识点生成一张卡片。</div>
         <div class="ai-msg ai-msg-user" id="ai-start-hint">点击下方按钮开始分析</div>
       </div>
+      <div id="refine-stage" class="refine-stage hidden"></div>
       <div id="ai-result" class="ai-result hidden"></div>
+      <div id="refine-options" class="refine-options hidden">
+        <div class="refine-option-row">
+          <label for="refine-max-items">延伸补充条数上限</label>
+          <input type="number" id="refine-max-items" min="1" max="20" value="8">
+        </div>
+      </div>
       <div class="ai-file-select">
         <div class="ai-import-title">选择要分析的文件</div>
         <div id="ai-file-list" class="ai-select-list"></div>
@@ -329,23 +346,7 @@
       <div style="width:40px"></div>
     </header>
     <main class="main-content">
-      <div class="section-header">
-        <h3>全部知识卡片</h3>
-        <span class="cards-count" id="cards-count"></span>
-      </div>
-      <div class="cards-toolbar">
-        <label class="cards-select-all"><input type="checkbox" id="cards-select-all"> 全选</label>
-        <div class="cards-toolbar-actions">
-          <button class="btn btn-outline btn-sm" id="btn-cards-bulk-review" disabled>加入今日复习</button>
-          <button class="btn btn-danger btn-sm" id="btn-cards-bulk-delete" disabled>删除选中</button>
-        </div>
-      </div>
-      <div id="cards-list" class="cards-list"></div>
-      <div id="cards-empty" class="empty-state hidden">
-        <div class="empty-icon">🃏</div>
-        <p>还没有知识卡片</p>
-        <p class="empty-hint">上传文件后点击“AI 趋势分析”生成卡片</p>
-      </div>
+      <div id="library-full" class="library-full"></div>
     </main>
   </div>
 </template>
@@ -534,7 +535,7 @@
 </div>
 
 <script src="./vendor/jszip.min.js"></script>
-<script src="./js/local/docx.js?v=30"></script>
+<script src="./js/local/docx.js?v=31"></script>
 <script>
   if (window.Capacitor && window.Capacitor.registerPlugin && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android') {
     window.AILearnDirectoryPicker = window.Capacitor.registerPlugin('AILearnDirectoryPicker');
@@ -545,19 +546,20 @@
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=30"></script>
-<script src="./js/local/db.js?v=30"></script>
-<script src="./js/local/core.js?v=30"></script>
-<script src="./js/local/ai.js?v=30"></script>
-<script src="./js/local/pdf.js?v=30"></script>
-<script src="./js/local/export.js?v=30"></script>
-<script src="./js/local/import.js?v=30"></script>
-<script src="./js/api.js?v=30"></script>
-<script src="./js/auth.js?v=30"></script>
-<script src="./js/zones.js?v=30"></script>
-<script src="./js/cards.js?v=30"></script>
-<script src="./js/settings.js?v=30"></script>
-<script src="./js/app.js?v=30"></script>
+<script src="./js/local/storage.js?v=31"></script>
+<script src="./js/local/db.js?v=31"></script>
+<script src="./js/local/core.js?v=31"></script>
+<script src="./js/local/ai.js?v=31"></script>
+<script src="./js/local/pdf.js?v=31"></script>
+<script src="./js/local/export.js?v=31"></script>
+<script src="./js/local/import.js?v=31"></script>
+<script src="./js/api.js?v=31"></script>
+<script src="./js/auth.js?v=31"></script>
+<script src="./js/zones.js?v=31"></script>
+<script src="./js/cards.js?v=31"></script>
+<script src="./js/library.js?v=31"></script>
+<script src="./js/settings.js?v=31"></script>
+<script src="./js/app.js?v=31"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

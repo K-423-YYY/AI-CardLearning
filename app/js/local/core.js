@@ -19,6 +19,9 @@
   const MODE_DAILY = 'daily';
   const MODE_REPLAY = 'replay';
   const MODE_WRONG = 'wrong';
+  const KIND_QUIZ = 'quiz';
+  const KIND_MEMORY = 'memory';
+  const MODE_MEMORY = 'memory';
   const REVIEW_INTERVALS = [1, 2, 4, 7, 15];
   const MEMORY_REVIEW_INTERVALS = [1, 2, 4, 7, 15, 30];
   const REVIEW_CLUSTER_TARGET = 15;
@@ -129,12 +132,54 @@
     return Array.from(new Set(list));
   }
 
+  function cardBlockKey(card) {
+    return String(card.path || card.block_name || '').trim();
+  }
+
+  function compareCardsForMode(a, b, sortMode) {
+    const fa = a.favorite ? 1 : 0;
+    const fb = b.favorite ? 1 : 0;
+    if (fa !== fb) return fb - fa;
+    if (sortMode === SORT_BLOCK) {
+      const ka = cardBlockKey(a);
+      const kb = cardBlockKey(b);
+      if (ka !== kb) return ka.localeCompare(kb, 'zh-Hans-CN');
+    }
+    const da = DIFFICULTY_ORDER[a.difficulty] === undefined ? 1 : DIFFICULTY_ORDER[a.difficulty];
+    const db_ = DIFFICULTY_ORDER[b.difficulty] === undefined ? 1 : DIFFICULTY_ORDER[b.difficulty];
+    if (da !== db_) return da - db_;
+    if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+    return String(a.id).localeCompare(String(b.id), 'zh-Hans-CN');
+  }
+
   function createCore(db) {
     async function cardsByZone(zoneId) {
       const files = await db.where('files', (f) => f.zone_id === zoneId);
       const fileIds = new Set(files.map((f) => f.id));
       const cards = await db.all('cards');
       return cards.filter((c) => fileIds.has(c.file_id));
+    }
+
+    async function zoneStudyMode(zoneId) {
+      const zs = await db.get('zone_settings', zoneId);
+      return zs && zs.study_mode === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+    }
+
+    async function memoryCardsByZone(zoneId) {
+      return (await db.all('memory_cards')).filter((c) => c.zone_id === zoneId);
+    }
+
+    async function cardsByKind(zoneId, kind) {
+      return kind === KIND_MEMORY ? memoryCardsByZone(zoneId) : cardsByZone(zoneId);
+    }
+
+    async function nextMemoryId(zoneId) {
+      const rows = await db.all('memory_cards');
+      const max = rows.reduce((m, r) => {
+        const n = Number(String(r.id || '').replace(/^m-/, ''));
+        return Number.isFinite(n) ? Math.max(m, n) : m;
+      }, 0);
+      return `m-${max + 1}`;
     }
 
     async function zoneExists(zoneId) {
@@ -161,29 +206,32 @@
       return String(zone.created_at || todayStr()).slice(0, 10);
     }
 
-    async function zoneTotalCards(zoneId) {
-      return (await cardsByZone(zoneId)).length;
+    async function zoneTotalCards(zoneId, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      return (await cardsByKind(zoneId, k)).length;
     }
 
-    async function pendingNewCards(zoneId) {
+    async function pendingNewCards(zoneId, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
       const sortMode = await zoneSortMode(zoneId);
-      const cards = (await cardsByZone(zoneId)).filter((c) => c.status !== STATUS_DONE);
+      const cards = (await cardsByKind(zoneId, k)).filter((c) => c.status !== STATUS_DONE);
       cards.sort((a, b) => {
-        if (sortMode === SORT_BLOCK && (a.block_name || '') !== (b.block_name || '')) {
-          return (a.block_name || '').localeCompare(b.block_name || '', 'zh-Hans-CN');
+        if (sortMode === SORT_BLOCK && cardBlockKey(a) !== cardBlockKey(b)) {
+          return cardBlockKey(a).localeCompare(cardBlockKey(b), 'zh-Hans-CN');
         }
         const da = DIFFICULTY_ORDER[a.difficulty] === undefined ? 1 : DIFFICULTY_ORDER[a.difficulty];
         const db_ = DIFFICULTY_ORDER[b.difficulty] === undefined ? 1 : DIFFICULTY_ORDER[b.difficulty];
         if (da !== db_) return da - db_;
         if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
-        return a.id - b.id;
+        return String(a.id).localeCompare(String(b.id), 'zh-Hans-CN');
       });
       return cards.map((c) => c.id);
     }
 
-    async function reviewEvents(zoneId) {
+    async function reviewEvents(zoneId, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
       const newCount = Math.max(1, await zoneLevelLimit(zoneId));
-      const pending = await pendingNewCards(zoneId);
+      const pending = await pendingNewCards(zoneId, k);
       const events = [];
       pending.forEach((cardId, idx) => {
         const dayNo = Math.floor(idx / newCount) + 1;
@@ -192,7 +240,11 @@
         });
       });
       const start = await zoneCreatedDate(zoneId);
-      const schedules = await db.where('review_schedule', (r) => r.zone_id === zoneId && r.status === 'pending');
+      const kindIds = new Set((await cardsByKind(zoneId, k)).map((c) => c.id));
+      const schedules = await db.where(
+        'review_schedule',
+        (r) => r.zone_id === zoneId && r.status === 'pending' && kindIds.has(r.card_id)
+      );
       schedules.forEach((row) => {
         const dayNo = Math.max(1, daysDiff(start, row.review_date) + 1);
         events.push([row.card_id, dayNo]);
@@ -268,15 +320,16 @@
       return list;
     }
 
-    async function computeLevelBounds(zoneId) {
-      const total = await zoneTotalCards(zoneId);
+    async function computeLevelBounds(zoneId, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const total = await zoneTotalCards(zoneId, k);
       const newCount = Math.max(1, await zoneLevelLimit(zoneId));
       if (total === 0) {
         return { lower: 0, upper: 0, recommended: 0, new_count: newCount };
       }
-      const pending = await pendingNewCards(zoneId);
+      const pending = await pendingNewCards(zoneId, k);
       const newLevelCount = pending.length ? Math.ceil(pending.length / newCount) : 0;
-      const events = await reviewEvents(zoneId);
+      const events = await reviewEvents(zoneId, k);
       const clusters = clusterReviewEvents(events);
       const dayClusters = dayReviewClusters(events);
       const strong = clusters.filter((c) => c.card_ids.length >= 4).length;
@@ -289,9 +342,10 @@
       return { lower, upper, recommended, new_count: newCount };
     }
 
-    async function buildLevelSpecs(zoneId, levelCount) {
+    async function buildLevelSpecs(zoneId, levelCount, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
       const newCount = Math.max(1, await zoneLevelLimit(zoneId));
-      const pending = await pendingNewCards(zoneId);
+      const pending = await pendingNewCards(zoneId, k);
       const newLevelCount = pending.length ? Math.ceil(pending.length / newCount) : 0;
       if (levelCount < newLevelCount) throw new LocalError(4007, '关卡数不能少于新学关下限');
       const sortMode = await zoneSortMode(zoneId);
@@ -300,9 +354,9 @@
         const newIds = pending.slice((lv - 1) * newCount, lv * newCount);
         let name = '';
         if (sortMode === SORT_BLOCK && newIds.length) {
-          const cards = await db.where('cards', (c) => newIds.includes(c.id) && c.block_name);
-          const first = cards.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id)[0];
-          name = first ? first.block_name : '';
+          const cards = (await cardsByKind(zoneId, k)).filter((c) => newIds.includes(c.id) && cardBlockKey(c));
+          const first = cards.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.id).localeCompare(String(b.id)))[0];
+          name = first ? cardBlockKey(first) : '';
         }
         specs.push({
           level_no: lv,
@@ -315,7 +369,7 @@
         });
       }
       let reviewCount = Math.max(0, levelCount - newLevelCount);
-      const events = await reviewEvents(zoneId);
+      const events = await reviewEvents(zoneId, k);
       let clusters = clusterReviewEvents(events);
       if (reviewCount < clusters.length) {
         clusters = mergeReviewClusters(clusters, reviewCount);
@@ -338,7 +392,8 @@
       return specs;
     }
 
-    async function buildNewLevelSpecs(zoneId, pending, startLevelNo) {
+    async function buildNewLevelSpecs(zoneId, pending, startLevelNo, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
       const newCount = Math.max(1, await zoneLevelLimit(zoneId));
       const sortMode = await zoneSortMode(zoneId);
       const specs = [];
@@ -346,9 +401,9 @@
         const ids = pending.slice(offset, offset + newCount);
         let name = '';
         if (sortMode === SORT_BLOCK && ids.length) {
-          const cards = await db.where('cards', (c) => ids.includes(c.id) && c.block_name);
-          const first = cards.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id)[0];
-          name = first ? first.block_name : '';
+          const cards = (await cardsByKind(zoneId, k)).filter((c) => ids.includes(c.id) && cardBlockKey(c));
+          const first = cards.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.id).localeCompare(String(b.id)))[0];
+          name = first ? cardBlockKey(first) : '';
         }
         const levelNo = startLevelNo + specs.length;
         specs.push({
@@ -384,17 +439,34 @@
       return removeIds.length;
     }
 
-    async function rebuildZoneLevels(zoneId, levelCount = null, preserveCompleted = false) {
-      const pending = await pendingNewCards(zoneId);
+    async function deleteCardRow(zoneId, store, cardId) {
+      for (const storeName of ['level_cards', 'daily_tasks', 'review_schedule', 'records']) {
+        const rows = await db.where(storeName, (r) => r.card_id === cardId);
+        for (const row of rows) await db.delete(storeName, row.id);
+      }
+      await db.delete(store, cardId);
+    }
+
+    function levelMatchesKind(level, kind) {
+      return (level.card_kind === kind) || (!level.card_kind && kind === KIND_QUIZ);
+    }
+
+    async function rebuildZoneLevels(zoneId, levelCount = null, preserveCompleted = false, kind = null) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const pending = await pendingNewCards(zoneId, k);
       const now = nowStr();
       let specs;
       if (preserveCompleted) {
-        const doneLevels = (await db.where('levels', (l) => l.zone_id === zoneId && l.status === STATUS_LEVEL_DONE)).sort(
-          (a, b) => a.level_no - b.level_no
-        );
+        const doneLevels = (await db.where(
+          'levels',
+          (l) => l.zone_id === zoneId && l.status === STATUS_LEVEL_DONE && levelMatchesKind(l, k)
+        )).sort((a, b) => a.level_no - b.level_no);
         const preserved = [];
         for (const lv of doneLevels) {
-          const lc = await db.where('level_cards', (r) => r.zone_id === zoneId && r.level_no === lv.level_no);
+          const lc = await db.where(
+            'level_cards',
+            (r) => r.zone_id === zoneId && r.level_no === lv.level_no && levelMatchesKind(r, k)
+          );
           if (!lc.length) continue;
           const newIds = lc.filter((r) => r.role === ROLE_NEW).map((r) => r.card_id);
           const reviewIds = lc.filter((r) => r.role === ROLE_REVIEW).map((r) => r.card_id);
@@ -411,8 +483,8 @@
         }
         const preservedIds = new Set(preserved.flatMap((s) => s.card_ids));
         const remaining = pending.filter((id) => !preservedIds.has(id));
-        const newSpecs = await buildNewLevelSpecs(zoneId, remaining, preserved.length + 1);
-        const clusters = clusterReviewEvents(await reviewEvents(zoneId));
+        const newSpecs = await buildNewLevelSpecs(zoneId, remaining, preserved.length + 1, k);
+        const clusters = clusterReviewEvents(await reviewEvents(zoneId, k));
         const reviewSpecs = clusters.map((c, idx) => ({
           level_no: preserved.length + newSpecs.length + 1 + idx,
           level_type: LEVEL_TYPE_REVIEW,
@@ -424,7 +496,7 @@
         }));
         specs = [...preserved, ...newSpecs, ...reviewSpecs];
       } else {
-        const bounds = await computeLevelBounds(zoneId);
+        const bounds = await computeLevelBounds(zoneId, k);
         let target = levelCount;
         if (target === null || target === undefined) {
           const zs = await db.get('zone_settings', zoneId);
@@ -434,20 +506,21 @@
           target = Math.max(bounds.lower, Math.min(bounds.upper, target || bounds.lower));
         }
         if (!target || target <= 0) return 0;
-        specs = await buildLevelSpecs(zoneId, target);
+        specs = await buildLevelSpecs(zoneId, target, k);
       }
       specs.forEach((spec, idx) => {
         spec.level_no = idx + 1;
       });
-      for (const row of await db.where('level_cards', (r) => r.zone_id === zoneId)) {
+      for (const row of await db.where('level_cards', (r) => r.zone_id === zoneId && levelMatchesKind(r, k))) {
         await db.delete('level_cards', row.id);
       }
-      for (const row of await db.where('levels', (r) => r.zone_id === zoneId)) {
+      for (const row of await db.where('levels', (l) => l.zone_id === zoneId && levelMatchesKind(l, k))) {
         await db.delete('levels', row.id);
       }
       for (const spec of specs) {
         await db.insert('levels', {
           zone_id: zoneId,
+          card_kind: k,
           level_no: spec.level_no,
           name: spec.name || '',
           level_type: spec.level_type,
@@ -462,6 +535,7 @@
           await db.insert('level_cards', {
             id: `lc:${zoneId}:${spec.level_no}:${cardId}`,
             zone_id: zoneId,
+            card_kind: k,
             level_no: spec.level_no,
             card_id: cardId,
             role: spec.new_card_ids.includes(cardId) ? ROLE_NEW : ROLE_REVIEW,
@@ -469,10 +543,10 @@
           });
         }
         if (spec.new_card_ids.length) {
-          const cards = await db.where('cards', (c) => spec.new_card_ids.includes(c.id));
+          const cards = (await cardsByKind(zoneId, k)).filter((c) => spec.new_card_ids.includes(c.id));
           for (const card of cards) {
             card.level_no = spec.level_no;
-            await db.put('cards', card);
+            await db.put(k === KIND_MEMORY ? 'memory_cards' : 'cards', card);
           }
         }
       }
@@ -483,21 +557,26 @@
         daily_limit: limit,
         level_count: specs.length,
         sort_mode: await zoneSortMode(zoneId),
+        study_mode: k,
         updated_at: now
       });
       return specs.length;
     }
 
-    async function wrongCardIds(zoneId) {
+    async function wrongCardIdsByKind(zoneId, kind) {
       const records = await db.all('records');
       const wrong = new Set();
-      const cards = await cardsByZone(zoneId);
+      const cards = await cardsByKind(zoneId, kind);
       const cardIds = new Set(cards.map((c) => c.id));
       records
         .filter((r) => r.is_correct === 0 && cardIds.has(r.card_id))
         .sort((a, b) => a.id - b.id)
         .forEach((r) => wrong.add(r.card_id));
       return Array.from(wrong);
+    }
+
+    async function wrongCardIds(zoneId) {
+      return wrongCardIdsByKind(zoneId, KIND_QUIZ);
     }
 
     async function recordCheckin(zoneId, dateStr, now) {
@@ -510,30 +589,40 @@
       });
     }
 
-    async function levelRows(zoneId) {
-      return (await db.where('levels', (l) => l.zone_id === zoneId)).sort((a, b) => a.level_no - b.level_no);
+    async function levelRows(zoneId, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      return (await db.where('levels', (l) => l.zone_id === zoneId && levelMatchesKind(l, k))).sort(
+        (a, b) => a.level_no - b.level_no
+      );
     }
 
-    async function levelRoleCards(zoneId, levelNo, role) {
-      const rows = await db.where('level_cards', (r) => r.zone_id === zoneId && r.level_no === levelNo && (!role || r.role === role));
+    async function levelRoleCards(zoneId, levelNo, role, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const rows = await db.where(
+        'level_cards',
+        (r) => r.zone_id === zoneId && r.level_no === levelNo && levelMatchesKind(r, k) && (!role || r.role === role)
+      );
       rows.sort((a, b) => a.id.localeCompare(b.id));
       return rows.map((r) => r.card_id);
     }
 
-    async function pendingNewIds(zoneId, levelNo) {
-      let cardIds = await levelRoleCards(zoneId, levelNo, ROLE_NEW);
+    async function pendingNewIds(zoneId, levelNo, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      let cardIds = await levelRoleCards(zoneId, levelNo, ROLE_NEW, k);
       if (!cardIds.length) {
-        const cards = await db.where('cards', (c) => c.level_no === levelNo && c.status !== STATUS_DONE);
-        return cards.map((c) => c.id).sort((a, b) => a - b);
+        const cards = (await cardsByKind(zoneId, k)).filter((c) => c.level_no === levelNo && c.status !== STATUS_DONE);
+        return cards.map((c) => c.id).sort((a, b) => String(a).localeCompare(String(b)));
       }
-      const cards = await db.where('cards', (c) => cardIds.includes(c.id) && c.status !== STATUS_DONE);
+      const cards = (await cardsByKind(zoneId, k)).filter((c) => cardIds.includes(c.id) && c.status !== STATUS_DONE);
       return cards.map((c) => c.id);
     }
 
-    async function dueReviewIds(zoneId, dateStr) {
+    async function dueReviewIds(zoneId, dateStr, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const kindIds = new Set((await cardsByKind(zoneId, k)).map((c) => c.id));
       const rows = await db.where(
         'review_schedule',
-        (r) => r.zone_id === zoneId && r.status === 'pending' && r.review_date <= dateStr
+        (r) => r.zone_id === zoneId && r.status === 'pending' && r.review_date <= dateStr && kindIds.has(r.card_id)
       );
       return unique(rows.map((r) => r.card_id));
     }
@@ -547,8 +636,8 @@
       return 'correct';
     }
 
-    async function recentWrongIds(zoneId) {
-      const cards = await cardsByZone(zoneId);
+    async function recentWrongIds(zoneId, kind) {
+      const cards = await cardsByKind(zoneId, kind || KIND_QUIZ);
       return cards
         .filter((card) => reviewModeForCard(card) === 'wrong')
         .map((card) => card.id);
@@ -570,19 +659,21 @@
       return result;
     }
 
-    async function firstActionableLevel(zoneId, dateStr) {
-      const due = await dueReviewIds(zoneId, dateStr);
-      const levels = await levelRows(zoneId);
+    async function firstActionableLevel(zoneId, dateStr, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const due = await dueReviewIds(zoneId, dateStr, k);
+      const levels = await levelRows(zoneId, k);
       for (const lv of levels) {
         if (lv.status === STATUS_LEVEL_DONE) continue;
-        if (lv.level_type === LEVEL_TYPE_NEW && (await pendingNewIds(zoneId, lv.level_no)).length) return lv;
+        if (lv.level_type === LEVEL_TYPE_NEW && (await pendingNewIds(zoneId, lv.level_no, k)).length) return lv;
         if (due.length) return lv;
       }
       return null;
     }
 
-    async function scheduleReviews(zoneId, cardId, dateStr, now) {
-      const card = await db.get('cards', cardId);
+    async function scheduleReviews(zoneId, cardId, dateStr, now, kind) {
+      const k = kind || KIND_QUIZ;
+      const card = await db.get(k === KIND_MEMORY ? 'memory_cards' : 'cards', cardId);
       const rows = await db.where(
         'review_schedule',
         (r) => r.zone_id === zoneId && r.card_id === cardId && r.status === 'pending'
@@ -621,24 +712,26 @@
       });
     }
 
-    async function levelReady(zoneId, level, dateStr) {
+    async function levelReady(zoneId, level, dateStr, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
       if (level.level_type === LEVEL_TYPE_NEW) {
-        if ((await pendingNewIds(zoneId, level.level_no)).length) return false;
+        if ((await pendingNewIds(zoneId, level.level_no, k)).length) return false;
       } else {
-        const cardIds = await levelRoleCards(zoneId, level.level_no, ROLE_REVIEW);
+        const cardIds = await levelRoleCards(zoneId, level.level_no, ROLE_REVIEW, k);
         if (!cardIds.length) return true;
         const rows = await db.where('review_schedule', (r) => r.zone_id === zoneId && cardIds.includes(r.card_id));
         if (!rows.length) return false;
         if (rows.some((r) => r.status === 'pending')) return false;
       }
-      return (await dueReviewIds(zoneId, dateStr)).length === 0;
+      return (await dueReviewIds(zoneId, dateStr, k)).length === 0;
     }
 
-    async function syncLevelStatuses(zoneId, dateStr, now) {
-      const levels = await levelRows(zoneId);
+    async function syncLevelStatuses(zoneId, dateStr, now, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const levels = await levelRows(zoneId, k);
       for (const lv of levels) {
         if (lv.status === STATUS_LEVEL_DONE) continue;
-        if (await levelReady(zoneId, lv, dateStr)) {
+        if (await levelReady(zoneId, lv, dateStr, k)) {
           lv.status = STATUS_LEVEL_DONE;
           lv.completed_at = now;
           await db.put('levels', lv);
@@ -647,24 +740,29 @@
       }
     }
 
-    async function hasActionableLevel(zoneId, dateStr) {
-      return (await firstActionableLevel(zoneId, dateStr)) !== null;
+    async function hasActionableLevel(zoneId, dateStr, kind) {
+      return (await firstActionableLevel(zoneId, dateStr, kind)) !== null;
     }
 
-    async function ensureReviewLevelForDue(zoneId, dateStr, now) {
-      const due = await dueReviewIds(zoneId, dateStr);
+    async function ensureReviewLevelForDue(zoneId, dateStr, now, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const due = await dueReviewIds(zoneId, dateStr, k);
       if (!due.length) return null;
       let level = (
-        await db.where('levels', (l) => l.zone_id === zoneId && l.status === STATUS_LEVEL_TODO && l.level_type === LEVEL_TYPE_REVIEW)
+        await db.where(
+          'levels',
+          (l) => l.zone_id === zoneId && l.status === STATUS_LEVEL_TODO && l.level_type === LEVEL_TYPE_REVIEW && levelMatchesKind(l, k)
+        )
       ).sort((a, b) => a.level_no - b.level_no)[0];
       if (!level) {
-        const levels = await levelRows(zoneId);
+        const levels = await levelRows(zoneId, k);
         const levelNo = levels.length ? levels[levels.length - 1].level_no + 1 : 1;
         const start = await zoneCreatedDate(zoneId);
         const dayNo = Math.max(1, daysDiff(start, dateStr) + 1);
         const limit = await zoneLevelLimit(zoneId);
         level = await db.insert('levels', {
           zone_id: zoneId,
+          card_kind: k,
           level_no: levelNo,
           name: '',
           level_type: LEVEL_TYPE_REVIEW,
@@ -681,6 +779,7 @@
           daily_limit: limit,
           level_count: levelNo,
           sort_mode: await zoneSortMode(zoneId),
+          study_mode: k,
           updated_at: now
         });
       }
@@ -688,6 +787,7 @@
         await db.put('level_cards', {
           id: `lc:${zoneId}:${level.level_no}:${cardId}`,
           zone_id: zoneId,
+          card_kind: k,
           level_no: level.level_no,
           card_id: cardId,
           role: ROLE_REVIEW,
@@ -697,8 +797,10 @@
       return level;
     }
 
-    async function ensureTodayTasks(zoneId, dateStr) {
-      let existing = (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr)).sort(
+    async function ensureTodayTasks(zoneId, dateStr, kind) {
+      const k = kind || (await zoneStudyMode(zoneId));
+      const kindTask = (t) => !t.card_kind || t.card_kind === k;
+      let existing = (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr && kindTask(t))).sort(
         (a, b) => a.position - b.position || a.id - b.id
       );
       const skipped = existing.filter((t) => t.status === 'skipped');
@@ -707,36 +809,37 @@
           t.status = 'pending';
           await db.put('daily_tasks', t);
         }
-        existing = (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr)).sort(
+        existing = (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr && kindTask(t))).sort(
           (a, b) => a.position - b.position || a.id - b.id
         );
       }
       if (existing.some((t) => t.status === 'pending')) return existing;
 
-      const levelCount = (await levelRows(zoneId)).length;
-      if (!levelCount) await rebuildZoneLevels(zoneId);
+      const levelCount = (await levelRows(zoneId, k)).length;
+      if (!levelCount) await rebuildZoneLevels(zoneId, null, false, k);
       const now = nowStr();
-      await syncLevelStatuses(zoneId, dateStr, now);
-      let current = await firstActionableLevel(zoneId, dateStr);
-      if (!current) current = await ensureReviewLevelForDue(zoneId, dateStr, now);
+      await syncLevelStatuses(zoneId, dateStr, now, k);
+      let current = await firstActionableLevel(zoneId, dateStr, k);
+      if (!current) current = await ensureReviewLevelForDue(zoneId, dateStr, now, k);
       if (!current) return existing;
 
       let newIds = [];
       if (current.level_type === LEVEL_TYPE_NEW) {
-        newIds = await pendingNewIds(zoneId, current.level_no);
+        newIds = await pendingNewIds(zoneId, current.level_no, k);
       }
-      const dueIds = await dueReviewIds(zoneId, dateStr);
-      const wrongIds = (await recentWrongIds(zoneId)).filter((id) => !dueIds.includes(id));
+      const dueIds = await dueReviewIds(zoneId, dateStr, k);
+      const wrongIds = (await recentWrongIds(zoneId, k)).filter((id) => !dueIds.includes(id));
       const dueSet = new Set(dueIds);
       const wrongSet = new Set(wrongIds);
       const queueIds = interleaveIds([shuffle(newIds), shuffle(wrongIds), shuffle(dueIds)]);
       if (!queueIds.length) return existing;
-      const tasks = await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr);
+      const tasks = await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr && kindTask(t));
       const maxPos = tasks.reduce((m, t) => Math.max(m, t.position || 0), 0);
       for (let i = 0; i < queueIds.length; i++) {
         await db.insert('daily_tasks', {
           user_id: 1,
           zone_id: zoneId,
+          card_kind: k,
           card_id: queueIds[i],
           task_date: dateStr,
           status: 'pending',
@@ -747,7 +850,7 @@
           created_at: now
         });
       }
-      return (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr)).sort(
+      return (await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr && kindTask(t))).sort(
         (a, b) => a.position - b.position || a.id - b.id
       );
     }
@@ -1108,7 +1211,7 @@
         (c) => c.file_id === fileId && c.title === title && c.question === question
       );
       if (dup.length) return false;
-      await db.insert('cards', {
+      const cardRow = await db.insert('cards', {
         file_id: fileId,
         title,
         question,
@@ -1133,7 +1236,69 @@
         level_no: null,
         created_at: nowStr()
       });
+      const memoryId = await createMemoryCardFromPoint(zoneId, fileId, point, cardData, sortOrder, cardRow.id);
+      cardRow.memory_card_id = memoryId;
+      await db.put('cards', cardRow);
       return true;
+    }
+
+    async function createMemoryCardFromPoint(zoneId, fileId, point, cardData, sortOrder, pairCardId) {
+      const title = String(point.title || '').trim();
+      const backDetail = String(
+        point.back_detail || cardData.back_detail || point.description || cardData.explanation || ''
+      ).trim();
+      const memoryId = await nextMemoryId(zoneId);
+      await db.put('memory_cards', {
+        id: memoryId,
+        pair_card_id: pairCardId,
+        zone_id: zoneId,
+        file_id: fileId,
+        title,
+        back_detail: backDetail,
+        learning_hint: String(point.learning_hint || cardData.hint || '').trim(),
+        source_ref: String(point.source_ref || cardData.source_ref || '').trim(),
+        path: String(point.path || '').trim(),
+        block_name: String(point.block_name || '').trim(),
+        difficulty: point.difficulty || '中',
+        sort_order: sortOrder || 0,
+        favorite: 0,
+        status: STATUS_TODO,
+        wrong_count: 0,
+        review_stage: 0,
+        correct_streak: 0,
+        lapse_count: 0,
+        last_review_at: null,
+        last_wrong_at: null,
+        last_correct_at: null,
+        level_no: null,
+        created_at: nowStr()
+      });
+      return memoryId;
+    }
+
+    function toLibraryCard(c, kind, fileMap) {
+      return {
+        id: c.id,
+        kind,
+        title: c.title,
+        question: c.question || '',
+        answer: c.answer || '',
+        explanation: c.explanation || '',
+        label: c.label || '',
+        back_detail: c.back_detail || '',
+        learning_hint: c.learning_hint || '',
+        source_ref: c.source_ref || '',
+        path: c.path || '',
+        block_name: c.block_name || '',
+        difficulty: c.difficulty || '中',
+        sort_order: c.sort_order || 0,
+        favorite: c.favorite ? 1 : 0,
+        status: c.status,
+        wrong_count: c.wrong_count || 0,
+        pair_id: kind === KIND_MEMORY ? c.pair_card_id : c.memory_card_id || null,
+        created_at: c.created_at,
+        filename: fileMap[c.file_id] || ''
+      };
     }
 
     async function collectExportData() {
@@ -1147,6 +1312,7 @@
         zones: await db.all('zones'),
         files: await db.all('files'),
         cards: await db.all('cards'),
+        memory_cards: await db.all('memory_cards'),
         records: await db.all('records'),
         zone_settings: await db.all('zone_settings'),
         levels: await db.all('levels'),
@@ -1160,6 +1326,10 @@
     async function deleteZoneData(zoneId) {
       const cards = await cardsByZone(zoneId);
       await deleteCards(zoneId, cards.map((c) => c.id));
+      const memoryCards = await memoryCardsByZone(zoneId);
+      for (const memoryCard of memoryCards) {
+        await deleteCardRow(zoneId, 'memory_cards', memoryCard.id);
+      }
       for (const row of await db.where('files', (f) => f.zone_id === zoneId)) {
         await db.delete('files', row.id);
       }
@@ -1211,6 +1381,8 @@
         const zoneMap = new Map();
         const fileMap = new Map();
         const cardMap = new Map();
+        const memoryMap = new Map();
+        const memoryByPair = new Map();
         const levelMap = new Map();
         const newZone = await db.insert('zones', {
           user_id: 1,
@@ -1264,6 +1436,49 @@
           cardMap.set(oldCard.id, newCard.id);
           cardsImported++;
         }
+        const oldMemoryCards = (data.memory_cards || []).filter(
+          (m) => fileMap.has(m.file_id) && cardMap.has(m.pair_card_id)
+        );
+        for (const oldMemory of oldMemoryCards) {
+          const newMemory = await db.put('memory_cards', {
+            id: await nextMemoryId(newZone.id),
+            pair_card_id: cardMap.get(oldMemory.pair_card_id),
+            zone_id: newZone.id,
+            file_id: fileMap.get(oldMemory.file_id),
+            title: oldMemory.title,
+            back_detail: oldMemory.back_detail || oldMemory.description || '',
+            learning_hint: oldMemory.learning_hint || '',
+            source_ref: oldMemory.source_ref || '',
+            path: oldMemory.path || '',
+            block_name: oldMemory.block_name || '',
+            difficulty: oldMemory.difficulty || '中',
+            sort_order: oldMemory.sort_order || 0,
+            favorite: oldMemory.favorite ? 1 : 0,
+            status: preserveProgress ? oldMemory.status || STATUS_TODO : STATUS_TODO,
+            wrong_count: preserveProgress ? oldMemory.wrong_count || 0 : 0,
+            review_stage: preserveProgress ? oldMemory.review_stage || 0 : 0,
+            correct_streak: preserveProgress ? oldMemory.correct_streak || 0 : 0,
+            lapse_count: preserveProgress ? oldMemory.lapse_count || 0 : 0,
+            last_review_at: preserveProgress ? oldMemory.last_review_at || null : null,
+            last_wrong_at: preserveProgress ? oldMemory.last_wrong_at || null : null,
+            last_correct_at: preserveProgress ? oldMemory.last_correct_at || null : null,
+            level_no: null,
+            created_at: oldMemory.created_at || nowStr()
+          });
+          memoryMap.set(oldMemory.id, newMemory.id);
+          memoryByPair.set(oldMemory.pair_card_id, newMemory.id);
+        }
+        for (const oldCard of oldCards) {
+          const quizId = cardMap.get(oldCard.id);
+          const memoryId = memoryByPair.get(oldCard.id);
+          if (quizId && memoryId) {
+            const quiz = await db.get('cards', quizId);
+            if (quiz) {
+              quiz.memory_card_id = memoryId;
+              await db.put('cards', quiz);
+            }
+          }
+        }
         const oldZoneSettings = (data.zone_settings || []).find((z) => z.zone_id === oldZone.id);
         if (oldZoneSettings) {
           await db.put('zone_settings', {
@@ -1272,6 +1487,7 @@
             daily_limit: oldZoneSettings.daily_limit || DEFAULT_DAILY_LIMIT,
             level_count: oldZoneSettings.level_count || null,
             sort_mode: oldZoneSettings.sort_mode || SORT_EASY,
+            study_mode: oldZoneSettings.study_mode === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ,
             updated_at: nowStr()
           });
         }
@@ -1280,6 +1496,7 @@
           for (const oldLevel of oldLevels) {
             const newLevel = await db.insert('levels', {
               zone_id: newZone.id,
+              card_kind: oldLevel.card_kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ,
               level_no: oldLevel.level_no,
               name: oldLevel.name || '',
               level_type: oldLevel.level_type || LEVEL_TYPE_NEW,
@@ -1296,8 +1513,20 @@
             await db.put('level_cards', {
               id: `lc:${newZone.id}:${oldLc.level_no}:${cardMap.get(oldLc.card_id)}`,
               zone_id: newZone.id,
+              card_kind: KIND_QUIZ,
               level_no: oldLc.level_no,
               card_id: cardMap.get(oldLc.card_id),
+              role: oldLc.role || ROLE_NEW,
+              created_at: oldLc.created_at || nowStr()
+            });
+          }
+          for (const oldLc of (data.level_cards || []).filter((r) => r.zone_id === oldZone.id && memoryMap.has(r.card_id))) {
+            await db.put('level_cards', {
+              id: `lc:${newZone.id}:${oldLc.level_no}:${memoryMap.get(oldLc.card_id)}`,
+              zone_id: newZone.id,
+              card_kind: KIND_MEMORY,
+              level_no: oldLc.level_no,
+              card_id: memoryMap.get(oldLc.card_id),
               role: oldLc.role || ROLE_NEW,
               created_at: oldLc.created_at || nowStr()
             });
@@ -1311,11 +1540,36 @@
               answered_at: oldRecord.answered_at || nowStr()
             });
           }
+          for (const oldRecord of (data.records || []).filter((r) => memoryMap.has(r.card_id))) {
+            await db.insert('records', {
+              card_id: memoryMap.get(oldRecord.card_id),
+              user_id: 1,
+              is_correct: oldRecord.is_correct || 0,
+              level_no: oldRecord.level_no != null ? oldRecord.level_no : null,
+              answered_at: oldRecord.answered_at || nowStr()
+            });
+          }
           for (const oldTask of (data.daily_tasks || []).filter((t) => t.zone_id === oldZone.id && cardMap.has(t.card_id))) {
             await db.insert('daily_tasks', {
               user_id: 1,
               zone_id: newZone.id,
+              card_kind: KIND_QUIZ,
               card_id: cardMap.get(oldTask.card_id),
+              task_date: oldTask.task_date,
+              status: oldTask.status || 'pending',
+              position: oldTask.position || 0,
+              level_no: oldTask.level_no,
+              mode: oldTask.mode || MODE_DAILY,
+              review_mode: oldTask.review_mode || 'new',
+              created_at: oldTask.created_at || nowStr()
+            });
+          }
+          for (const oldTask of (data.daily_tasks || []).filter((t) => t.zone_id === oldZone.id && memoryMap.has(t.card_id))) {
+            await db.insert('daily_tasks', {
+              user_id: 1,
+              zone_id: newZone.id,
+              card_kind: KIND_MEMORY,
+              card_id: memoryMap.get(oldTask.card_id),
               task_date: oldTask.task_date,
               status: oldTask.status || 'pending',
               position: oldTask.position || 0,
@@ -1331,6 +1585,17 @@
               user_id: 1,
               zone_id: newZone.id,
               card_id: cardMap.get(oldReview.card_id),
+              review_date: oldReview.review_date,
+              status: oldReview.status || 'pending',
+              created_at: oldReview.created_at || nowStr()
+            });
+          }
+          for (const oldReview of (data.review_schedule || []).filter((r) => r.zone_id === oldZone.id && memoryMap.has(r.card_id))) {
+            await db.put('review_schedule', {
+              id: `r:1:${memoryMap.get(oldReview.card_id)}:${oldReview.review_date}`,
+              user_id: 1,
+              zone_id: newZone.id,
+              card_id: memoryMap.get(oldReview.card_id),
               review_date: oldReview.review_date,
               status: oldReview.status || 'pending',
               created_at: oldReview.created_at || nowStr()
@@ -1364,6 +1629,233 @@
         }
       }
       return { imported_zones: importedZones.length, skipped_zones: skippedZones, cards_imported: cardsImported };
+    }
+
+    async function submitMemoryAnswer(cardId, body) {
+      const dateStr = todayStr();
+      const now = nowStr();
+      const card = await db.get('memory_cards', cardId);
+      if (!card) throw new LocalError(4040, '记忆卡不存在');
+      const zoneId = card.zone_id;
+      await getZone(zoneId);
+      const mode = body.mode || MODE_DAILY;
+      const practice = mode === MODE_WRONG;
+      const replay = mode === MODE_REPLAY;
+      const known = !!body.known;
+      let task = null;
+      if (!practice && !replay) {
+        task = (
+          await db.where(
+            'daily_tasks',
+            (t) =>
+              t.user_id === 1 &&
+              t.zone_id === zoneId &&
+              t.card_id === cardId &&
+              t.task_date === dateStr &&
+              t.mode === MODE_DAILY
+          )
+        ).sort((a, b) => a.id - b.id)[0];
+        if (!task || task.status !== 'pending') throw new LocalError(4090, '该记忆卡不在今日任务中或已完成');
+        if (body.level_no != null && task.level_no != null && task.level_no !== body.level_no) {
+          throw new LocalError(4090, '关卡上下文不匹配');
+        }
+      }
+      const levelNo = task ? task.level_no : body.level_no != null ? body.level_no : card.level_no || null;
+      const wrongCount = card.wrong_count || 0;
+      let cardStatus = card.status;
+      await db.insert('records', {
+        card_id: cardId,
+        user_id: 1,
+        is_correct: known ? 1 : 0,
+        level_no: levelNo,
+        answered_at: now
+      });
+      if (known) {
+        if (!replay) {
+          card.review_stage = Math.min(6, (card.review_stage || 0) + 1);
+          card.correct_streak = (card.correct_streak || 0) + 1;
+          card.last_review_at = now;
+          card.last_correct_at = now;
+          if (task) {
+            task.status = 'done';
+            await db.put('daily_tasks', task);
+          }
+          if (!practice) {
+            if (card.status !== STATUS_DONE) {
+              card.status = STATUS_DONE;
+              cardStatus = STATUS_DONE;
+            }
+            await scheduleReviews(zoneId, cardId, dateStr, now, KIND_MEMORY);
+            const remaining = (await memoryCardsByZone(zoneId)).filter((c) => c.status !== STATUS_DONE).length;
+            if (remaining === 0) {
+              const zone = await db.get('zones', zoneId);
+              zone.status = '已完成';
+              zone.updated_at = now;
+              await db.put('zones', zone);
+            }
+          }
+          await db.put('memory_cards', card);
+        }
+        await syncLevelStatuses(zoneId, dateStr, now, KIND_MEMORY);
+      } else {
+        if (!replay) {
+          card.wrong_count = wrongCount + 1;
+          card.lapse_count = (card.lapse_count || 0) + 1;
+          card.correct_streak = 0;
+          card.last_wrong_at = now;
+          if (!practice) {
+            const wrongToday = (await db.where(
+              'records',
+              (r) => r.card_id === cardId && r.user_id === 1 && r.is_correct === 0 && String(r.answered_at).slice(0, 10) === dateStr
+            )).length;
+            if (wrongToday >= 3) {
+              card.status = STATUS_REVIEW;
+              cardStatus = STATUS_REVIEW;
+            }
+            await scheduleWrongRetry(zoneId, cardId, dateStr, now);
+          }
+          if (task) {
+            const others = (
+              await db.where(
+                'daily_tasks',
+                (t) => t.zone_id === zoneId && t.task_date === dateStr && t.status === 'pending' && t.id !== task.id
+              )
+            ).sort((a, b) => a.position - b.position || a.id - b.id);
+            task.position = others.length + 1;
+            await db.put('daily_tasks', task);
+          }
+          await db.put('memory_cards', card);
+        }
+      }
+      return {
+        correct: known,
+        card_status: cardStatus,
+        wrong_count: wrongCount + (known ? 0 : 1),
+        level_no: levelNo,
+        mode
+      };
+    }
+
+    async function listLibraryCards(zoneId, kind, query) {
+      await getZone(zoneId);
+      const sortMode = await zoneSortMode(zoneId);
+      const files = await db.all('files');
+      const fileMap = {};
+      files.forEach((f) => {
+        fileMap[f.id] = f.filename;
+      });
+      let cards;
+      if (kind === 'favorites') {
+        const quiz = (await cardsByZone(zoneId)).filter((c) => c.favorite);
+        const memory = (await memoryCardsByZone(zoneId)).filter((c) => c.favorite);
+        cards = [
+          ...quiz.map((c) => toLibraryCard(c, KIND_QUIZ, fileMap)),
+          ...memory.map((c) => toLibraryCard(c, KIND_MEMORY, fileMap))
+        ];
+      } else {
+        const k = kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+        cards = (await cardsByKind(zoneId, k)).map((c) => toLibraryCard(c, k, fileMap));
+      }
+      cards.sort((a, b) => compareCardsForMode(a, b, sortMode));
+      const q = String(query || '').trim().toLowerCase();
+      if (q) {
+        cards = cards.filter((c) =>
+          [c.title, c.question, c.back_detail, c.learning_hint, c.source_ref, c.path, c.block_name, c.explanation]
+            .filter(Boolean)
+            .some((text) => String(text).toLowerCase().includes(q))
+        );
+      }
+      return { cards, kind: kind === 'favorites' ? 'favorites' : (kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ) };
+    }
+
+    async function toggleFavorite(zoneId, kind, cardId) {
+      await getZone(zoneId);
+      const k = kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+      const store = k === KIND_MEMORY ? 'memory_cards' : 'cards';
+      const card = await db.get(store, cardId);
+      if (!card) throw new LocalError(4040, '卡片不存在');
+      const zoneOk = k === KIND_MEMORY
+        ? card.zone_id === zoneId
+        : (await db.where('files', (f) => f.zone_id === zoneId && f.id === card.file_id)).length > 0;
+      if (!zoneOk) throw new LocalError(4040, '卡片不存在');
+      card.favorite = card.favorite ? 0 : 1;
+      await db.put(store, card);
+      return { favorite: card.favorite, id: cardId, kind: k };
+    }
+
+    async function deleteLibraryCards(zoneId, kind, cardIds, withPair) {
+      await getZone(zoneId);
+      const k = kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+      let deleted = 0;
+      for (const id of unique(cardIds || [])) {
+        const store = k === KIND_MEMORY ? 'memory_cards' : 'cards';
+        const card = await db.get(store, id);
+        if (!card) continue;
+        const zoneOk = k === KIND_MEMORY
+          ? card.zone_id === zoneId
+          : (await db.where('files', (f) => f.zone_id === zoneId && f.id === card.file_id)).length > 0;
+        if (!zoneOk) continue;
+        await deleteCardRow(zoneId, store, id);
+        deleted++;
+        if (withPair) {
+          const pairId = k === KIND_MEMORY ? card.pair_card_id : card.memory_card_id;
+          if (pairId) {
+            const pairStore = k === KIND_MEMORY ? 'cards' : 'memory_cards';
+            const pair = await db.get(pairStore, pairId);
+            if (pair) {
+              await deleteCardRow(zoneId, pairStore, pairId);
+              deleted++;
+            }
+          }
+        }
+      }
+      await rebuildZoneLevels(zoneId, null, true, k);
+      if (withPair) {
+        await rebuildZoneLevels(zoneId, null, true, k === KIND_MEMORY ? KIND_QUIZ : KIND_MEMORY);
+      }
+      return { deleted };
+    }
+
+    async function studyCards(zoneId, kind, cardIds) {
+      await getZone(zoneId);
+      const k = kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+      const dateStr = todayStr();
+      const cards = [];
+      for (const id of unique(cardIds || [])) {
+        const card = await db.get(k === KIND_MEMORY ? 'memory_cards' : 'cards', id);
+        if (!card) continue;
+        const zoneOk = k === KIND_MEMORY
+          ? card.zone_id === zoneId
+          : (await db.where('files', (f) => f.zone_id === zoneId && f.id === card.file_id)).length > 0;
+        if (!zoneOk) continue;
+        if (k === KIND_MEMORY) {
+          cards.push({
+            card_id: card.id,
+            kind: k,
+            title: card.title,
+            front: card.title,
+            back_detail: card.back_detail,
+            learning_hint: card.learning_hint,
+            source_ref: card.source_ref,
+            path: card.path,
+            difficulty: card.difficulty,
+            status: card.status
+          });
+        } else {
+          const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
+          cards.push({
+            card_id: card.id,
+            kind: k,
+            title: card.title,
+            question: card.question,
+            options,
+            answer,
+            label: card.label,
+            explanation: card.explanation
+          });
+        }
+      }
+      return { cards, kind: k };
     }
 
     return {
@@ -1438,17 +1930,25 @@
 
       async getZoneDetail(zoneId) {
         const zone = await getZone(zoneId);
-        const cards = await cardsByZone(zoneId);
+        const kind = await zoneStudyMode(zoneId);
+        const cards = await cardsByKind(zoneId, kind);
+        const memoryCards = await memoryCardsByZone(zoneId);
         const stats = {
           total: cards.length,
-          success: cards.filter((c) => c.status === STATUS_DONE).length
+          success: cards.filter((c) => c.status === STATUS_DONE).length,
+          memory_total: memoryCards.length,
+          memory_success: memoryCards.filter((c) => c.status === STATUS_DONE).length
         };
         const files = (await db.where('files', (f) => f.zone_id === zoneId)).sort((a, b) => a.id - b.id);
         const data = { ...zone };
         data.daily_limit = await zoneLevelLimit(zoneId);
         data.sort_mode = await zoneSortMode(zoneId);
-        data.level_count = (await levelRows(zoneId)).length;
-        data.completed_levels = (await db.where('levels', (l) => l.zone_id === zoneId && l.status === STATUS_LEVEL_DONE)).length;
+        data.study_mode = kind;
+        data.level_count = (await levelRows(zoneId, kind)).length;
+        data.completed_levels = (await db.where(
+          'levels',
+          (l) => l.zone_id === zoneId && levelMatchesKind(l, kind) && l.status === STATUS_LEVEL_DONE
+        )).length;
         return {
           zone: data,
           stats,
@@ -1474,18 +1974,26 @@
         if (sortMode !== SORT_EASY && sortMode !== SORT_BLOCK) {
           throw new LocalError(4007, '排序模式仅支持 easy_to_hard 或 block');
         }
+        const studyMode = body.study_mode !== undefined ? body.study_mode : zs && zs.study_mode ? zs.study_mode : KIND_QUIZ;
+        if (studyMode !== KIND_QUIZ && studyMode !== KIND_MEMORY) {
+          throw new LocalError(4007, '学习模式仅支持 quiz 或 memory');
+        }
         await db.put('zone_settings', {
           id: zoneId,
           zone_id: zoneId,
           daily_limit: dailyLimit,
           sort_mode: sortMode,
+          study_mode: studyMode,
           level_count: zs && zs.level_count ? zs.level_count : null,
           updated_at: nowStr()
         });
         if (body.sort_mode !== undefined) {
-          await rebuildZoneLevels(zoneId);
+          await rebuildZoneLevels(zoneId, null, false, await zoneStudyMode(zoneId));
         }
-        return { zone_id: zoneId, daily_card_limit: dailyLimit, sort_mode: sortMode };
+        if (body.study_mode !== undefined && (await levelRows(zoneId, studyMode)).length === 0) {
+          await rebuildZoneLevels(zoneId, null, false, studyMode);
+        }
+        return { zone_id: zoneId, daily_card_limit: dailyLimit, sort_mode: sortMode, study_mode: studyMode };
       },
 
       async relayoutLevels(zoneId, levelCount) {
@@ -1549,10 +2057,11 @@
         await getZone(zoneId);
         const dateStr = todayStr();
         const limit = await zoneLevelLimit(zoneId);
-        const tasks = await ensureTodayTasks(zoneId, dateStr);
+        const kind = await zoneStudyMode(zoneId);
+        const tasks = await ensureTodayTasks(zoneId, dateStr, kind);
         const pendingTasks = tasks.filter((t) => t.status === 'pending');
-        const current = await firstActionableLevel(zoneId, dateStr);
-        const completed = pendingTasks.length === 0 && !(await hasActionableLevel(zoneId, dateStr));
+        const current = await firstActionableLevel(zoneId, dateStr, kind);
+        const completed = pendingTasks.length === 0 && !(await hasActionableLevel(zoneId, dateStr, kind));
         const doneCount = tasks.filter((t) => t.status === 'done').length;
         const totalCount = tasks.length;
         const levelNo = current ? current.level_no : tasks.length ? tasks[0].level_no : null;
@@ -1560,36 +2069,60 @@
         let newTotal = 0;
         let newDone = 0;
         if (current && current.level_type === LEVEL_TYPE_NEW) {
-          const ids = await levelRoleCards(zoneId, current.level_no, ROLE_NEW);
+          const ids = await levelRoleCards(zoneId, current.level_no, ROLE_NEW, kind);
           if (ids.length) {
-            const rows = await db.where('cards', (c) => ids.includes(c.id));
+            const rows = (await cardsByKind(zoneId, kind)).filter((c) => ids.includes(c.id));
             newTotal = rows.filter((r) => r.status !== STATUS_DONE).length;
           }
           newDone = (await db.where(
             'daily_tasks',
-            (t) => t.zone_id === zoneId && t.task_date === dateStr && t.level_no === current.level_no && t.status === 'done'
+            (t) =>
+              t.zone_id === zoneId &&
+              t.task_date === dateStr &&
+              t.level_no === current.level_no &&
+              t.status === 'done' &&
+              (!t.card_kind || t.card_kind === kind)
           )).length;
         }
         const checkedIn = !!(await db.get('checkins', `c:${zoneId}:${dateStr}`));
         const cards = [];
         for (const task of pendingTasks) {
-          const card = await db.get('cards', task.card_id);
+          const card = await db.get(kind === KIND_MEMORY ? 'memory_cards' : 'cards', task.card_id);
           if (!card) continue;
-          const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
-          cards.push({
-            card_id: card.id,
-            title: card.title,
-            question: card.question,
-            options,
-            answer,
-            label: card.label,
-            explanation: card.explanation,
-            review_mode: task.review_mode || reviewModeForCard(card)
-          });
+          if (kind === KIND_MEMORY) {
+            cards.push({
+              card_id: card.id,
+              kind,
+              title: card.title,
+              front: card.title,
+              back_detail: card.back_detail,
+              learning_hint: card.learning_hint,
+              source_ref: card.source_ref,
+              path: card.path,
+              difficulty: card.difficulty,
+              status: card.status,
+              review_mode: task.review_mode || reviewModeForCard(card)
+            });
+          } else {
+            const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
+            cards.push({
+              card_id: card.id,
+              kind,
+              title: card.title,
+              question: card.question,
+              options,
+              answer,
+              label: card.label,
+              explanation: card.explanation,
+              review_mode: task.review_mode || reviewModeForCard(card)
+            });
+          }
         }
         return {
           task_date: dateStr,
           daily_limit: limit,
+          kind,
+          study_mode: kind,
           level_no: levelNo,
           level_type: levelType,
           new_total: newTotal,
@@ -1605,26 +2138,30 @@
       async startLevel(zoneId, levelNo) {
         await getZone(zoneId);
         const dateStr = todayStr();
-        const level = (await db.where('levels', (l) => l.zone_id === zoneId && l.level_no === levelNo))[0];
+        const kind = await zoneStudyMode(zoneId);
+        const level = (await db.where(
+          'levels',
+          (l) => l.zone_id === zoneId && l.level_no === levelNo && levelMatchesKind(l, kind)
+        ))[0];
         if (!level) throw new LocalError(4040, '关卡不存在');
-        const current = await firstActionableLevel(zoneId, dateStr);
+        const current = await firstActionableLevel(zoneId, dateStr, kind);
         const mode = current && current.level_no === levelNo ? MODE_DAILY : MODE_REPLAY;
         let pending;
         let doneCount = 0;
         let totalCount = 0;
         if (mode === MODE_DAILY) {
-          const tasks = await ensureTodayTasks(zoneId, dateStr);
-          const levelTasks = tasks.filter((t) => t.level_no === levelNo);
+          const tasks = await ensureTodayTasks(zoneId, dateStr, kind);
+          const levelTasks = tasks.filter((t) => t.level_no === levelNo && (!t.card_kind || t.card_kind === kind));
           pending = levelTasks.filter((t) => t.status === 'pending');
           doneCount = levelTasks.filter((t) => t.status === 'done').length;
           totalCount = levelTasks.length;
         } else {
-          const newIds = await levelRoleCards(zoneId, levelNo, ROLE_NEW);
-          const reviewIds = await levelRoleCards(zoneId, levelNo, ROLE_REVIEW);
+          const newIds = await levelRoleCards(zoneId, levelNo, ROLE_NEW, kind);
+          const reviewIds = await levelRoleCards(zoneId, levelNo, ROLE_REVIEW, kind);
           let queueIds;
           if (!newIds.length && !reviewIds.length) {
-            const rows = await db.where('cards', (c) => c.level_no === levelNo);
-            queueIds = rows.map((c) => c.id).sort((a, b) => a - b);
+            const rows = (await cardsByKind(zoneId, kind)).filter((c) => c.level_no === levelNo);
+            queueIds = rows.map((c) => c.id).sort((a, b) => String(a).localeCompare(String(b)));
           } else {
             queueIds = [...newIds, ...reviewIds.filter((id) => !newIds.includes(id))];
           }
@@ -1633,20 +2170,38 @@
         }
         const cards = [];
         for (const task of pending) {
-          const card = await db.get('cards', task.card_id);
+          const card = await db.get(kind === KIND_MEMORY ? 'memory_cards' : 'cards', task.card_id);
           if (!card) continue;
-          const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
-          cards.push({
-            card_id: card.id,
-            title: card.title,
-            question: card.question,
-            options,
-            answer,
-            label: card.label,
-            explanation: card.explanation,
-            level_no: task.level_no,
-            review_mode: task.review_mode || reviewModeForCard(card)
-          });
+          if (kind === KIND_MEMORY) {
+            cards.push({
+              card_id: card.id,
+              kind,
+              title: card.title,
+              front: card.title,
+              back_detail: card.back_detail,
+              learning_hint: card.learning_hint,
+              source_ref: card.source_ref,
+              path: card.path,
+              difficulty: card.difficulty,
+              status: card.status,
+              level_no: task.level_no,
+              review_mode: task.review_mode || reviewModeForCard(card)
+            });
+          } else {
+            const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
+            cards.push({
+              card_id: card.id,
+              kind,
+              title: card.title,
+              question: card.question,
+              options,
+              answer,
+              label: card.label,
+              explanation: card.explanation,
+              level_no: task.level_no,
+              review_mode: task.review_mode || reviewModeForCard(card)
+            });
+          }
         }
         return {
           level: {
@@ -1657,6 +2212,8 @@
             new_count: level.new_count,
             status: level.status
           },
+          kind,
+          study_mode: kind,
           mode,
           cards,
           total_count: totalCount,
@@ -1732,7 +2289,7 @@
               }
             }
           }
-          await syncLevelStatuses(zoneId, dateStr, now);
+          await syncLevelStatuses(zoneId, dateStr, now, KIND_QUIZ);
         } else {
           if (!replay) {
             card.wrong_count = wrongCount + 1;
@@ -1780,25 +2337,42 @@
         };
       },
 
-      async getWrongCards(zoneId) {
+      async getWrongCards(zoneId, kind) {
         await getZone(zoneId);
+        const k = kind || KIND_QUIZ;
         const records = await db.all('records');
-        const cards = await cardsByZone(zoneId);
+        const cards = await cardsByKind(zoneId, k);
         const cardMap = {};
         cards.forEach((c) => {
-          cardMap[c.id] = c;
+          cardMap[String(c.id)] = c;
         });
         const group = {};
         records
-          .filter((r) => r.is_correct === 0 && cardMap[r.card_id])
+          .filter((r) => r.is_correct === 0 && cardMap[String(r.card_id)])
           .forEach((r) => {
-            (group[r.card_id] = group[r.card_id] || []).push(r);
+            (group[String(r.card_id)] = group[String(r.card_id)] || []).push(r);
           });
         const wrongCards = Object.entries(group)
           .map(([id, rows]) => {
-            const c = cardMap[Number(id)];
+            const c = cardMap[String(id)];
+            if (k === KIND_MEMORY) {
+              return {
+                id: c.id,
+                kind: k,
+                title: c.title,
+                back_detail: c.back_detail,
+                learning_hint: c.learning_hint,
+                source_ref: c.source_ref,
+                path: c.path,
+                status: c.status,
+                wrong_count: c.wrong_count,
+                wrong_times: rows.length,
+                last_wrong: rows.map((r) => r.answered_at).sort().slice(-1)[0]
+              };
+            }
             return {
               id: c.id,
+              kind: k,
               title: c.title,
               question: c.question,
               option_a: c.option_a,
@@ -1902,17 +2476,32 @@
         return { added, total: ids.length };
       },
 
-      async getWrongPractice(zoneId) {
+      async getWrongPractice(zoneId, kind) {
         await getZone(zoneId);
+        const k = kind || KIND_QUIZ;
         const dateStr = todayStr();
-        const wrongIds = await wrongCardIds(zoneId);
+        const wrongIds = await wrongCardIdsByKind(zoneId, k);
         const cards = [];
         for (const id of wrongIds) {
-          const card = await db.get('cards', id);
+          const card = await db.get(k === KIND_MEMORY ? 'memory_cards' : 'cards', id);
           if (!card) continue;
+          if (k === KIND_MEMORY) {
+            cards.push({
+              card_id: card.id,
+              kind: k,
+              title: card.title,
+              front: card.title,
+              back_detail: card.back_detail,
+              learning_hint: card.learning_hint,
+              source_ref: card.source_ref,
+              path: card.path
+            });
+            continue;
+          }
           const [options, answer] = shuffledOptions(card, card.wrong_count || 0, dateStr);
           cards.push({
             card_id: card.id,
+            kind: k,
             title: card.title,
             question: card.question,
             options,
@@ -1924,11 +2513,12 @@
         return { cards, total: cards.length };
       },
 
-      async addWrongPractice(zoneId) {
+      async addWrongPractice(zoneId, kind) {
         await getZone(zoneId);
+        const k = kind || KIND_QUIZ;
         const dateStr = todayStr();
         const now = nowStr();
-        const ids = await wrongCardIds(zoneId);
+        const ids = await wrongCardIdsByKind(zoneId, k);
         let added = 0;
         for (const cardId of ids) {
           const task = (
@@ -1945,6 +2535,7 @@
             await db.insert('daily_tasks', {
               user_id: 1,
               zone_id: zoneId,
+              card_kind: k,
               card_id: cardId,
               task_date: dateStr,
               status: 'pending',
@@ -1961,31 +2552,32 @@
         await getZone(zoneId);
         const dateStr = todayStr();
         const limit = await zoneLevelLimit(zoneId);
-        const cards = await cardsByZone(zoneId);
+        const kind = await zoneStudyMode(zoneId);
+        const cards = await cardsByKind(zoneId, kind);
         const total = cards.length;
         const done = cards.filter((c) => c.status === STATUS_DONE).length;
-        let levelCount = (await levelRows(zoneId)).length;
+        let levelCount = (await levelRows(zoneId, kind)).length;
         if (!levelCount) {
-          await rebuildZoneLevels(zoneId);
-          levelCount = (await levelRows(zoneId)).length;
+          await rebuildZoneLevels(zoneId, null, false, kind);
+          levelCount = (await levelRows(zoneId, kind)).length;
         }
         const now = nowStr();
-        await syncLevelStatuses(zoneId, dateStr, now);
-        await ensureReviewLevelForDue(zoneId, dateStr, now);
-        const levels = await levelRows(zoneId);
+        await syncLevelStatuses(zoneId, dateStr, now, kind);
+        await ensureReviewLevelForDue(zoneId, dateStr, now, kind);
+        const levels = await levelRows(zoneId, kind);
         const totalLevels = total > 0 ? Math.max(1, levels.length) : 0;
         const completedLevels = levels.filter((l) => l.status === STATUS_LEVEL_DONE).length;
-        const actionable = await firstActionableLevel(zoneId, dateStr);
+        const actionable = await firstActionableLevel(zoneId, dateStr, kind);
         const currentRow = actionable || levels.find((l) => l.status === STATUS_LEVEL_TODO) || null;
         const currentLevel = currentRow ? currentRow.level_no : totalLevels;
         const levelPath = [];
         for (const lv of levels) {
-          const newIds = await levelRoleCards(zoneId, lv.level_no, ROLE_NEW);
-          const reviewIds = await levelRoleCards(zoneId, lv.level_no, ROLE_REVIEW);
+          const newIds = await levelRoleCards(zoneId, lv.level_no, ROLE_NEW, kind);
+          const reviewIds = await levelRoleCards(zoneId, lv.level_no, ROLE_REVIEW, kind);
           let allIds = unique([...newIds, ...reviewIds]);
           if (!allIds.length) {
-            const rows = await db.where('cards', (c) => c.level_no === lv.level_no);
-            allIds = rows.map((c) => c.id).sort((a, b) => a - b);
+            const rows = (await cardsByKind(zoneId, kind)).filter((c) => c.level_no === lv.level_no);
+            allIds = rows.map((c) => c.id).sort((a, b) => String(a).localeCompare(String(b)));
             newIds.length = 0;
             newIds.push(...allIds);
           }
@@ -1993,11 +2585,11 @@
           const reviewSet = new Set(reviewIds);
           let blockName = '';
           if (newIds.length) {
-            const rows = await db.where('cards', (c) => newIds.includes(c.id) && c.block_name);
-            const first = rows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id)[0];
-            blockName = first ? first.block_name : '';
+            const rows = (await cardsByKind(zoneId, kind)).filter((c) => newIds.includes(c.id) && cardBlockKey(c));
+            const first = rows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.id).localeCompare(String(b.id)))[0];
+            blockName = first ? cardBlockKey(first) : '';
           }
-          const cardRows = await db.where('cards', (c) => allIds.includes(c.id));
+          const cardRows = (await cardsByKind(zoneId, kind)).filter((c) => allIds.includes(c.id));
           const cardCount = cardRows.length;
           const doneCards = cardRows.filter((r) => r.status === STATUS_DONE).length;
           const newTotal = cardRows.filter((r) => newSet.has(r.id) && r.status !== STATUS_DONE).length;
@@ -2005,7 +2597,13 @@
           if (newIds.length) {
             newDone = (await db.where(
               'daily_tasks',
-              (t) => t.zone_id === zoneId && t.task_date === dateStr && t.level_no === lv.level_no && t.status === 'done' && newIds.includes(t.card_id)
+              (t) =>
+                t.zone_id === zoneId &&
+                t.task_date === dateStr &&
+                t.level_no === lv.level_no &&
+                t.status === 'done' &&
+                (!t.card_kind || t.card_kind === kind) &&
+                newIds.includes(t.card_id)
             )).length;
           }
           let dueReviews = 0;
@@ -2041,20 +2639,21 @@
             completed_at: lv.completed_at
           });
         }
-        const tasks = await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr);
+        const tasks = await db.where('daily_tasks', (t) => t.zone_id === zoneId && t.task_date === dateStr && (!t.card_kind || t.card_kind === kind));
         const pendingCnt = tasks.filter((t) => t.status === 'pending').length;
         const moreLevels = levels.some((l) => l.status === STATUS_LEVEL_TODO);
         const todayDone =
-          !(await hasActionableLevel(zoneId, dateStr)) || (tasks.length > 0 && tasks.every((t) => t.status === 'done') && !moreLevels);
+          !(await hasActionableLevel(zoneId, dateStr, kind)) || (tasks.length > 0 && tasks.every((t) => t.status === 'done') && !moreLevels);
+        const kindIds = new Set(cards.map((c) => c.id));
         const reviewToday = unique(
           (
             await db.where(
               'review_schedule',
-              (r) => r.zone_id === zoneId && r.review_date <= dateStr && r.status === 'pending'
+              (r) => r.zone_id === zoneId && r.review_date <= dateStr && r.status === 'pending' && kindIds.has(r.card_id)
             )
           ).map((r) => r.card_id)
         ).length;
-        const bounds = await computeLevelBounds(zoneId);
+        const bounds = await computeLevelBounds(zoneId, kind);
         const zs = await db.get('zone_settings', zoneId);
         let selected = zs && zs.level_count ? zs.level_count : null;
         if (selected !== null && bounds.upper > 0) selected = Math.max(bounds.lower, Math.min(bounds.upper, selected));
@@ -2085,6 +2684,7 @@
           done_cards: done,
           daily_limit: limit,
           sort_mode: await zoneSortMode(zoneId),
+          study_mode: kind,
           total_levels: totalLevels,
           completed_levels: completedLevels,
           new_levels: levels.filter((l) => l.level_type === LEVEL_TYPE_NEW).length,
@@ -2119,6 +2719,13 @@
       getZoneSourceFiles,
       getReviewSchedule,
       generateCard,
+      memoryCardsByZone,
+      zoneStudyMode,
+      listLibraryCards,
+      toggleFavorite,
+      deleteLibraryCards,
+      studyCards,
+      submitMemoryAnswer,
       collectExportData,
       deleteZoneData,
       importData

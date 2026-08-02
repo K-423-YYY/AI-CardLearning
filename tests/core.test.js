@@ -458,3 +458,118 @@ test('checkin, streak and progress update after completing level', async () => {
   assert.ok(progress.completed_levels >= 1);
   assert.ok(progress.week.some((w) => w.checked));
 });
+
+test('generateCard creates a paired memory card for every quiz card', async () => {
+  const core = makeCore();
+  const zoneId = (await core.createZone()).id;
+  await addCard(core, zoneId, '成对知识点', 'A', {
+    difficulty: '难',
+    block_name: '基础',
+    explanation: '成对解析'
+  });
+  const memory = await core.memoryCardsByZone(zoneId);
+  assert.strictEqual(memory.length, 1);
+  assert.strictEqual(memory[0].title, '成对知识点');
+  assert.strictEqual(memory[0].back_detail, '成对解析');
+  assert.strictEqual(memory[0].difficulty, '难');
+  assert.strictEqual(memory[0].block_name, '基础');
+  const quiz = (await core.listCards(zoneId)).cards[0];
+  assert.strictEqual(quiz.id, memory[0].pair_card_id);
+  const storedQuiz = await core.listLibraryCards(zoneId, 'quiz');
+  assert.strictEqual(storedQuiz.cards[0].pair_id, memory[0].id);
+});
+
+test('library list supports favorite pinning and keyword search', async () => {
+  const core = makeCore();
+  const zoneId = (await core.createZone()).id;
+  await addCard(core, zoneId, '变量作用域');
+  await addCard(core, zoneId, '闭包与函数');
+
+  let library = await core.listLibraryCards(zoneId, 'quiz');
+  assert.strictEqual(library.cards.length, 2);
+  assert.strictEqual(library.cards.every((c) => c.favorite === 0), true);
+
+  const second = library.cards[1];
+  await core.toggleFavorite(zoneId, 'quiz', second.id);
+  library = await core.listLibraryCards(zoneId, 'quiz');
+  assert.strictEqual(library.cards[0].id, second.id);
+  assert.strictEqual(library.cards[0].favorite, 1);
+
+  const filtered = await core.listLibraryCards(zoneId, 'quiz', '闭包');
+  assert.strictEqual(filtered.cards.length, 1);
+  assert.strictEqual(filtered.cards[0].title, '闭包与函数');
+
+  const favorites = await core.listLibraryCards(zoneId, 'favorites');
+  assert.strictEqual(favorites.cards.length, 1);
+  assert.strictEqual(favorites.cards[0].title, '闭包与函数');
+});
+
+test('library delete removes current kind only unless pair is requested', async () => {
+  const core = makeCore();
+  const zoneId = (await core.createZone()).id;
+  await addCard(core, zoneId, '待删知识点');
+  const quiz = (await core.listLibraryCards(zoneId, 'quiz')).cards[0];
+  const memory = (await core.listLibraryCards(zoneId, 'memory')).cards[0];
+
+  let result = await core.deleteLibraryCards(zoneId, 'quiz', [quiz.id], false);
+  assert.strictEqual(result.deleted, 1);
+  assert.strictEqual((await core.listLibraryCards(zoneId, 'quiz')).cards.length, 0);
+  assert.strictEqual((await core.listLibraryCards(zoneId, 'memory')).cards.length, 1);
+
+  result = await core.deleteLibraryCards(zoneId, 'memory', [memory.id], true);
+  assert.strictEqual(result.deleted, 1);
+  assert.strictEqual((await core.listLibraryCards(zoneId, 'memory')).cards.length, 0);
+});
+
+test('memory mode levels reuse the same path rules with flip-card answers', async () => {
+  const core = makeCore();
+  const zoneId = (await core.createZone('记忆模式区')).id;
+  await addCard(core, zoneId, '记忆点一');
+  await addCard(core, zoneId, '记忆点二');
+  await core.rebuildZoneLevels(zoneId, null, false, 'quiz');
+
+  await core.updateZoneSettings(zoneId, { study_mode: 'memory' });
+  const today = await core.getToday(zoneId);
+  assert.strictEqual(today.kind, 'memory');
+  assert.strictEqual(today.pending.length, 2);
+  assert.ok(today.pending.every((c) => c.kind === 'memory'));
+
+  for (const card of today.pending) {
+    const ok = await core.submitMemoryAnswer(card.card_id, { known: true, mode: 'daily', level_no: today.level_no });
+    assert.strictEqual(ok.correct, true);
+  }
+
+  const doneToday = await core.getToday(zoneId);
+  assert.strictEqual(doneToday.completed, true);
+  const memory = await core.listLibraryCards(zoneId, 'memory');
+  assert.strictEqual(memory.cards.every((c) => c.status === '成功'), true);
+
+  await core.updateZoneSettings(zoneId, { study_mode: 'quiz' });
+  const quizProgress = await core.getProgress(zoneId);
+  assert.strictEqual(quizProgress.study_mode, 'quiz');
+  assert.ok(quizProgress.levels.length >= 1);
+});
+
+test('export format v2 restores memory cards and study mode', async () => {
+  const core = makeCore();
+  await core.updateSettings({ nickname: '导出记忆' });
+  const zoneId = (await core.createZone('记忆备份区')).id;
+  await addCard(core, zoneId, '备份记忆点');
+  await core.updateZoneSettings(zoneId, { study_mode: 'memory' });
+  const data = await core.collectExportData();
+  assert.strictEqual(data.memory_cards.length, 1);
+
+  const fresh = makeCore();
+  const filesMap = {};
+  data.files.forEach((f) => {
+    filesMap[f.id] = f.content;
+  });
+  const result = await fresh.importData(data, filesMap, { conflictMode: 'skip', preserveProgress: true });
+  assert.strictEqual(result.imported_zones, 1);
+  const zones = await fresh.listZones();
+  const importedId = zones.zones[0].id;
+  const detail = await fresh.getZoneDetail(importedId);
+  assert.strictEqual(detail.zone.study_mode, 'memory');
+  assert.strictEqual((await fresh.listLibraryCards(importedId, 'quiz')).cards.length, 1);
+  assert.strictEqual((await fresh.listLibraryCards(importedId, 'memory')).cards.length, 1);
+});

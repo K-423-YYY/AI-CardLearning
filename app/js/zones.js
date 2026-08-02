@@ -136,7 +136,6 @@ const Zones = {
 
     document.getElementById('btn-upload').onclick = () => App.navigate('upload', zoneId);
     document.getElementById('btn-ai-trend').onclick = () => App.navigate('ai', zoneId);
-    document.getElementById('btn-cards').onclick = () => App.navigate('cards', zoneId);
     document.getElementById('btn-wrong').onclick = () => App.navigate('wrong', zoneId);
 
     await this.loadZoneDetail(zoneId);
@@ -220,12 +219,32 @@ const Zones = {
     this.currentZoneId = zoneId;
     this.aiPoints = [];
     this.oldCards = [];
+    this.refineMode = false;
+    this.refineState = null;
     const tpl = document.getElementById('tpl-ai');
     App.setPage(tpl);
     document.getElementById('btn-back-ai').onclick = () => App.navigate('zone', zoneId);
     document.getElementById('btn-ai-analyze').onclick = () => this.handleAiAnalyze(zoneId);
     document.getElementById('btn-ai-regenerate').onclick = () => this.handleAiAnalyze(zoneId);
     document.getElementById('btn-ai-confirm').onclick = () => this.handleAiGenerate(zoneId);
+    document.querySelectorAll('.ai-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.refineMode = btn.dataset.mode === 'refine';
+        document.querySelectorAll('.ai-mode-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        const stage = document.getElementById('refine-stage');
+        const options = document.getElementById('refine-options');
+        if (options) options.classList.toggle('hidden', !this.refineMode);
+        if (stage) stage.classList.add('hidden');
+        this.refineState = null;
+        this.aiPoints = [];
+        const hint = document.getElementById('ai-start-hint');
+        if (hint) {
+          hint.textContent = this.refineMode
+            ? '四阶段精炼：结构分析 → 延伸补充 → 结构化拆解 → 生成卡片'
+            : '点击下方按钮开始分析';
+        }
+      });
+    });
     document.querySelectorAll('input[name="replace-old"]').forEach(radio => {
       radio.addEventListener('change', () => this.toggleAiSelect());
     });
@@ -339,6 +358,9 @@ const Zones = {
   },
 
   async handleAiAnalyze(zoneId) {
+    if (this.refineMode) {
+      return this.handleRefineStage1(zoneId);
+    }
     const chat = document.getElementById('ai-chat');
     const resultEl = document.getElementById('ai-result');
     const analyzeBtn = document.getElementById('btn-ai-analyze');
@@ -412,6 +434,274 @@ const Zones = {
     }
   },
 
+  async handleRefineStage1(zoneId) {
+    const chat = document.getElementById('ai-chat');
+    const stage = document.getElementById('refine-stage');
+    const analyzeBtn = document.getElementById('btn-ai-analyze');
+    const regenerateBtn = document.getElementById('btn-ai-regenerate');
+    const confirmBtn = document.getElementById('btn-ai-confirm');
+    const progressWrap = document.getElementById('ai-analyze-progress');
+    const fileIds = Array.from(document.querySelectorAll('.ai-file-check:checked')).map((cb) => parseInt(cb.dataset.id, 10));
+    if (!fileIds.length) {
+      Toast.show('请至少选择一个文件', 'error');
+      return;
+    }
+    analyzeBtn.disabled = true;
+    if (regenerateBtn) regenerateBtn.disabled = true;
+    stage.classList.add('hidden');
+    stage.innerHTML = '';
+    const rec = await this.recommendedProfileForFileIds(zoneId, fileIds);
+    const select = document.getElementById('ai-speed-select');
+    const profile = (!select || select.value === 'auto') ? rec.profile : this.profileByMultiplier(Number(select.value));
+    const speedRef = { value: profile };
+    this.speedRef = speedRef;
+    const tierLabel = profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+    chat.innerHTML += `<div class="ai-msg ai-msg-bot">第一阶段：正在按 ${tierLabel} 档分析结构与范围...</div>`;
+    if (progressWrap) progressWrap.classList.remove('hidden');
+    try {
+      const data = await API.post(`/api/zones/${zoneId}/refine/analyze`, {
+        file_ids: fileIds,
+        speedRef,
+        onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total, `${tierLabel} 档`)
+      });
+      if (progressWrap) progressWrap.classList.add('hidden');
+      this.refineState = {
+        scope: data.scope || '',
+        outline: data.outline || [],
+        issues: data.issues || [],
+        points: data.knowledge_points || [],
+        acceptedIssues: new Set((data.issues || []).map((_, i) => i)),
+        extensions: [],
+        keptExtensions: new Set(),
+        tree: null,
+        decomposedPoints: [],
+        mergedPoints: [],
+        sortMode: 'easy_to_hard'
+      };
+      if (!this.refineState.points.length) {
+        chat.innerHTML += '<div class="ai-msg ai-msg-bot">没有识别到知识点，请换一份资料重试。</div>';
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = '重新分析';
+        return;
+      }
+      this.renderRefineStage1(zoneId);
+      analyzeBtn.classList.add('hidden');
+      if (regenerateBtn) {
+        regenerateBtn.classList.remove('hidden');
+        regenerateBtn.disabled = false;
+      }
+      if (confirmBtn) confirmBtn.classList.add('hidden');
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">结构分析完成：${this.refineState.points.length} 条知识点，${this.refineState.issues.length} 条疑似错误。请审阅后进入延伸补充。</div>`;
+    } catch (e) {
+      if (progressWrap) progressWrap.classList.add('hidden');
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">分析失败：${Utils.esc(e.message)}</div>`;
+      analyzeBtn.disabled = false;
+    }
+  },
+
+  renderRefineStage1(zoneId) {
+    const stage = document.getElementById('refine-stage');
+    const s = this.refineState;
+    const issuesHtml = s.issues.length
+      ? s.issues.map((item, i) => `
+          <div class="refine-issue ${s.acceptedIssues.has(i) ? '' : 'ignored'}">
+            <div class="refine-issue-head">
+              <label><input type="checkbox" class="refine-issue-check" data-idx="${i}" ${s.acceptedIssues.has(i) ? 'checked' : ''}> 采纳</label>
+              <span class="refine-issue-title">${Utils.esc(item.issue)}</span>
+            </div>
+            <div class="refine-issue-source">原文：${Utils.esc(item.source || '')}</div>
+            <div class="refine-issue-reason">理由：${Utils.esc(item.reason || '')}</div>
+            <div class="refine-issue-suggestion">建议：${Utils.esc(item.suggestion || '')}</div>
+          </div>
+        `).join('')
+      : '<div class="refine-none">未发现疑似错误</div>';
+    stage.innerHTML = `
+      <div class="refine-section">
+        <div class="refine-section-title">第一阶段 · 结构范围分析</div>
+        <div class="refine-scope">${Utils.esc(s.scope || '')}</div>
+        <div class="refine-outline">${(s.outline || []).map((item) => `<div>${Utils.esc(item)}</div>`).join('')}</div>
+      </div>
+      <div class="refine-section">
+        <div class="refine-section-title">疑似错误清单（${s.issues.length}）</div>
+        ${issuesHtml}
+      </div>
+      <div class="refine-actions">
+        <button class="btn btn-primary btn-block" id="btn-refine-stage2">确认结构，进入延伸补充</button>
+      </div>
+    `;
+    stage.classList.remove('hidden');
+    stage.querySelectorAll('.refine-issue-check').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const idx = Number(cb.dataset.idx);
+        if (cb.checked) s.acceptedIssues.add(idx);
+        else s.acceptedIssues.delete(idx);
+        cb.closest('.refine-issue').classList.toggle('ignored', !cb.checked);
+      });
+    });
+    document.getElementById('btn-refine-stage2').onclick = () => this.handleRefineStage2(zoneId);
+  },
+
+  async handleRefineStage2(zoneId) {
+    const chat = document.getElementById('ai-chat');
+    const stage = document.getElementById('refine-stage');
+    const maxInput = document.getElementById('refine-max-items');
+    const maxItems = maxInput ? Number(maxInput.value) || 8 : 8;
+    stage.classList.add('hidden');
+    chat.innerHTML += '<div class="ai-msg ai-msg-bot">第二阶段：正在生成延伸补充内容...</div>';
+    try {
+      const data = await API.post(`/api/zones/${zoneId}/refine/extend`, {
+        points: this.refineState.points,
+        max_items: maxItems
+      });
+      this.refineState.extensions = data.extensions || [];
+      this.refineState.keptExtensions = new Set(this.refineState.extensions.map((e) => e.id));
+      this.renderRefineStage2(zoneId);
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">延伸补充完成：${this.refineState.extensions.length} 条。可逐条取舍，或整块跳过。</div>`;
+    } catch (e) {
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">延伸补充失败：${Utils.esc(e.message)}</div>`;
+    }
+  },
+
+  renderRefineStage2(zoneId) {
+    const stage = document.getElementById('refine-stage');
+    const s = this.refineState;
+    const itemsHtml = s.extensions.length
+      ? s.extensions.map((item) => `
+          <div class="refine-extension">
+            <label class="refine-extension-head">
+              <input type="checkbox" class="refine-ext-check" data-id="${Utils.esc(item.id)}" ${s.keptExtensions.has(item.id) ? 'checked' : ''}>
+              <span class="refine-ext-category">${Utils.esc(item.category)}</span>
+              <span class="refine-ext-title">${Utils.esc(item.title)}</span>
+            </label>
+            <div class="refine-ext-content">${Utils.esc(item.content || '')}</div>
+            <div class="refine-ext-reason">补充理由：${Utils.esc(item.reason || '')}</div>
+          </div>
+        `).join('')
+      : '<div class="refine-none">没有生成延伸内容，可直接进入下一步。</div>';
+    stage.innerHTML = `
+      <div class="refine-section">
+        <div class="refine-section-title">第二阶段 · 知识延伸与补充（${s.extensions.length}）</div>
+        ${itemsHtml}
+      </div>
+      <div class="refine-actions">
+        <button class="btn btn-outline btn-block" id="btn-refine-skip-ext">整块跳过</button>
+        <button class="btn btn-primary btn-block" id="btn-refine-stage3">确认延伸，进入结构化拆解</button>
+      </div>
+    `;
+    stage.classList.remove('hidden');
+    stage.querySelectorAll('.refine-ext-check').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) s.keptExtensions.add(cb.dataset.id);
+        else s.keptExtensions.delete(cb.dataset.id);
+      });
+    });
+    document.getElementById('btn-refine-skip-ext').onclick = () => {
+      s.keptExtensions = new Set();
+      this.handleRefineStage3(zoneId);
+    };
+    document.getElementById('btn-refine-stage3').onclick = () => this.handleRefineStage3(zoneId);
+  },
+
+  async handleRefineStage3(zoneId) {
+    const chat = document.getElementById('ai-chat');
+    const stage = document.getElementById('refine-stage');
+    stage.classList.add('hidden');
+    const s = this.refineState;
+    const merged = [...s.points];
+    (s.extensions || []).forEach((item) => {
+      if (!s.keptExtensions.has(item.id)) return;
+      merged.push({ title: item.title, description: item.content, block_name: item.category, source_type: 'extension' });
+    });
+    chat.innerHTML += '<div class="ai-msg ai-msg-bot">第三阶段：正在把知识拆解为原子条目并构建知识树...</div>';
+    try {
+      const data = await API.post(`/api/zones/${zoneId}/refine/decompose`, { points: merged });
+      s.tree = data.tree || [];
+      s.decomposedPoints = data.points || [];
+      s.mergedPoints = merged;
+      this.renderRefineStage3(zoneId);
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">结构化拆解完成：${s.decomposedPoints.length} 条原子知识点。请选择排序方式。</div>`;
+    } catch (e) {
+      chat.innerHTML += `<div class="ai-msg ai-msg-bot">结构化拆解失败：${Utils.esc(e.message)}</div>`;
+    }
+  },
+
+  renderRefineStage3(zoneId) {
+    const stage = document.getElementById('refine-stage');
+    const s = this.refineState;
+    stage.innerHTML = `
+      <div class="refine-section">
+        <div class="refine-section-title">第三阶段 · 知识树（${s.decomposedPoints.length} 条原子知识点）</div>
+        <div class="refine-tree">${this.refineTreeHtml(s.tree)}</div>
+      </div>
+      <div class="refine-section">
+        <div class="refine-section-title">选择排序方式</div>
+        <div class="sort-mode-control">
+          <button class="sort-mode-btn active" data-sort="easy_to_hard">由易到难</button>
+          <button class="sort-mode-btn" data-sort="block">按结构</button>
+        </div>
+      </div>
+      <div class="refine-actions">
+        <button class="btn btn-success btn-block" id="btn-refine-generate">确认排序并生成卡片</button>
+      </div>
+    `;
+    stage.classList.remove('hidden');
+    stage.querySelectorAll('.sort-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        s.sortMode = btn.dataset.sort;
+        stage.querySelectorAll('.sort-mode-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      });
+    });
+    document.getElementById('btn-refine-generate').onclick = () => this.handleRefineGenerate(zoneId);
+  },
+
+  refineTreeHtml(tree) {
+    if (!Array.isArray(tree) || !tree.length) return '<div class="refine-none">知识树为空</div>';
+    return '<ul>' + tree.map((node) => this.refineNodeHtml(node)).join('') + '</ul>';
+  },
+
+  refineNodeHtml(node) {
+    const name = Utils.esc((node && node.name) || '未命名');
+    const structures = (node && node.structures) || [];
+    const blocks = (node && node.blocks) || [];
+    let children = '';
+    if (structures.length) {
+      children = '<ul>' + structures.map((n) => this.refineNodeHtml(n)).join('') + '</ul>';
+    } else if (blocks.length) {
+      children = '<ul>' + blocks.map((block) => {
+        const points = (block.points || []).map((p) => `<li class="refine-point">${Utils.esc(p.title)}</li>`).join('');
+        return `<li>${Utils.esc((block && block.name) || '未分区')}${points ? '<ul>' + points + '</ul>' : ''}</li>`;
+      }).join('') + '</ul>';
+    }
+    return `<li>${name}${children}</li>`;
+  },
+
+  async handleRefineGenerate(zoneId) {
+    const s = this.refineState;
+    if (!s || !s.decomposedPoints.length) return;
+    try {
+      await API.put(`/api/zones/${zoneId}/settings`, { sort_mode: s.sortMode });
+    } catch (e) {
+      // sort is best effort here
+    }
+    const order = { 易: 0, 中: 1, 难: 2 };
+    const points = s.decomposedPoints.slice();
+    if (s.sortMode === 'block') {
+      points.sort(
+        (a, b) =>
+          String(a.path || '').localeCompare(String(b.path || '')) ||
+          (order[a.difficulty] ?? 1) - (order[b.difficulty] ?? 1)
+      );
+    } else {
+      points.sort(
+        (a, b) =>
+          (order[a.difficulty] ?? 1) - (order[b.difficulty] ?? 1) ||
+          String(a.path || '').localeCompare(String(b.path || ''))
+      );
+    }
+    this.aiPoints = points;
+    await this.handleAiGenerate(zoneId);
+  },
+
   updateAiProgress(barId, textId, done, total, prefix) {
     const bar = document.getElementById(barId);
     const text = document.getElementById(textId);
@@ -473,117 +763,7 @@ const Zones = {
 
   // Dedicated card list page grouped by block
   async renderCards(zoneId) {
-    this.currentZoneId = zoneId;
-    const tpl = document.getElementById('tpl-cards');
-    App.setPage(tpl);
-    document.getElementById('btn-back-cards').onclick = () => App.navigate('zone', zoneId);
-    try {
-      const data = await API.get(`/api/zones/${zoneId}/cards`);
-      const cards = data.cards || [];
-      const listEl = document.getElementById('cards-list');
-      const emptyEl = document.getElementById('cards-empty');
-      const toolbar = document.querySelector('.cards-toolbar');
-      document.getElementById('cards-count').textContent = `${cards.length} 张`;
-      if (cards.length === 0) {
-        listEl.innerHTML = '';
-        if (toolbar) toolbar.classList.add('hidden');
-        emptyEl.classList.remove('hidden');
-        return;
-      }
-      emptyEl.classList.add('hidden');
-      if (toolbar) toolbar.classList.remove('hidden');
-      const groups = {};
-      cards.forEach(c => {
-        const block = c.block_name || '未分区';
-        (groups[block] = groups[block] || []).push(c);
-      });
-      listEl.innerHTML = Object.entries(groups).map(([block, blockCards]) => `
-        <div class="cards-block">
-          <div class="cards-block-head">${Utils.esc(block)} <span>${blockCards.length} 张</span></div>
-          ${blockCards.map(c => `
-            <div class="cards-item">
-              <input type="checkbox" class="cards-check" data-id="${c.id}">
-              <div class="cards-item-body">
-                <div class="cards-item-top">
-                  <span class="cards-status ${c.status === '成功' ? 'status-done' : c.status === '重点复习' ? 'badge-review' : 'badge-todo'}">${Utils.esc(c.status)}</span>
-                  <span class="cards-title">${Utils.esc(c.title)}</span>
-                  <span class="cards-difficulty diff-${({ '易': 'easy', '中': 'mid', '难': 'hard' })[c.difficulty] || 'mid'}">${Utils.esc(c.difficulty || '中')}</span>
-                </div>
-                <div class="cards-question">${Utils.esc(c.question)}</div>
-                <div class="cards-meta">${Utils.esc(c.label)} · 正确答案 ${Utils.esc(c.answer)}</div>
-                <div class="cards-item-actions">
-                  <button class="btn btn-outline btn-sm cards-btn-review" data-id="${c.id}">复习</button>
-                  <button class="btn btn-danger btn-sm cards-btn-delete" data-id="${c.id}">删除</button>
-                </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `).join('');
-
-      const selectAll = document.getElementById('cards-select-all');
-      const bulkReview = document.getElementById('btn-cards-bulk-review');
-      const bulkDelete = document.getElementById('btn-cards-bulk-delete');
-      const updateBulk = () => {
-        const checked = listEl.querySelectorAll('.cards-check:checked').length;
-        bulkReview.disabled = checked === 0;
-        bulkDelete.disabled = checked === 0;
-        selectAll.checked = checked === cards.length;
-      };
-      const selectedIds = () => Array.from(listEl.querySelectorAll('.cards-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
-      selectAll.addEventListener('change', () => {
-        listEl.querySelectorAll('.cards-check').forEach(cb => { cb.checked = selectAll.checked; });
-        updateBulk();
-      });
-      listEl.querySelectorAll('.cards-check').forEach(cb => cb.addEventListener('change', updateBulk));
-      bulkReview.addEventListener('click', async () => {
-        const ids = selectedIds();
-        if (!ids.length) return;
-        try {
-          const result = await API.post('/api/cards/batch-review', { card_ids: ids });
-          Toast.show(`已加入 ${result.added} 张卡片到今日复习`, 'success');
-          await this.renderCards(zoneId);
-        } catch (e) {
-          Toast.show(e.message, 'error');
-        }
-      });
-      bulkDelete.addEventListener('click', async () => {
-        const ids = selectedIds();
-        if (!ids.length) return;
-        if (!window.confirm(`确定删除选中的 ${ids.length} 张卡片？删除后相关记录会一并清理。`)) return;
-        try {
-          const result = await API.post('/api/cards/batch-delete', { card_ids: ids });
-          Toast.show(`已删除 ${result.deleted} 张卡片`, 'success');
-          await this.renderCards(zoneId);
-        } catch (e) {
-          Toast.show(e.message, 'error');
-        }
-      });
-      listEl.querySelectorAll('.cards-btn-review').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          try {
-            await API.post('/api/cards/batch-review', { card_ids: [parseInt(btn.dataset.id, 10)] });
-            Toast.show('已加入今日复习', 'success');
-          } catch (e) {
-            Toast.show(e.message, 'error');
-          }
-        });
-      });
-      listEl.querySelectorAll('.cards-btn-delete').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          if (!window.confirm('确定删除这张卡片？删除后相关记录会一并清理。')) return;
-          try {
-            await API.post('/api/cards/batch-delete', { card_ids: [parseInt(btn.dataset.id, 10)] });
-            Toast.show('已删除', 'success');
-            await this.renderCards(zoneId);
-          } catch (e) {
-            Toast.show(e.message, 'error');
-          }
-        });
-      });
-    } catch (e) {
-      Toast.show(e.message, 'error');
-    }
+    await Library.renderFull(zoneId);
   },
 
   async loadZoneDetail(zoneId) {
@@ -599,6 +779,7 @@ const Zones = {
         <div class="stat-item"><div class="stat-num">${stats.success}</div><div class="stat-label">已通关</div></div>
         <div class="stat-item"><div class="stat-num">${files.length}</div><div class="stat-label">文件数</div></div>
       `;
+      this.renderStudyMode(zoneId, zone.study_mode || 'quiz');
       await this.loadProgress(zoneId);
 
       // File list
@@ -619,11 +800,30 @@ const Zones = {
         analyzeArea.classList.add('hidden');
       }
 
-      // Load cards
-      await this.loadCards(zoneId);
+      // Load card libraries
+      await Library.renderEmbedded(zoneId, document.getElementById('library-panel'));
     } catch (e) {
       Toast.show(e.message, 'error');
     }
+  },
+
+  renderStudyMode(zoneId, mode) {
+    const row = document.getElementById('study-mode-row');
+    if (!row) return;
+    row.querySelectorAll('.study-mode-btn').forEach((btn) => {
+      const active = btn.dataset.mode === mode;
+      btn.classList.toggle('active', active);
+      btn.onclick = async () => {
+        if (btn.dataset.mode === mode) return;
+        try {
+          await API.put(`/api/zones/${zoneId}/settings`, { study_mode: btn.dataset.mode });
+          Toast.show('关卡学习模式已切换', 'success');
+          await this.loadZoneDetail(zoneId);
+        } catch (e) {
+          Toast.show(e.message, 'error');
+        }
+      };
+    });
   },
 
   // Upload file

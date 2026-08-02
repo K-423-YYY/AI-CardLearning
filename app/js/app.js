@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.5';
+const APP_VERSION = '0.2.0';
 
 const Utils = {
   esc(str) {

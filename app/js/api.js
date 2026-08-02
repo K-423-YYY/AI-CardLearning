@@ -178,20 +178,67 @@ const LocalAPI = {
             return result;
           }
           if (sub === 'cards' && method === 'GET') return LocalCoreInstance.listCards(zoneId);
+          if (sub === 'library' && method === 'GET') {
+            const kind = queryParams(url).get('kind') || 'quiz';
+            const q = queryParams(url).get('q') || '';
+            return LocalCoreInstance.listLibraryCards(zoneId, kind, q);
+          }
           if (sub === 'today' && method === 'GET') return LocalCoreInstance.getToday(zoneId);
-          if (sub === 'wrong-cards' && method === 'GET') return LocalCoreInstance.getWrongCards(zoneId);
+          if (sub === 'wrong-cards' && method === 'GET') {
+            const kind = queryParams(url).get('kind') || 'quiz';
+            return LocalCoreInstance.getWrongCards(zoneId, kind);
+          }
           if (sub === 'wrong-practice') {
-            if (method === 'GET') return LocalCoreInstance.getWrongPractice(zoneId);
-            if (method === 'POST') return LocalCoreInstance.addWrongPractice(zoneId);
+            const kind = queryParams(url).get('kind') || 'quiz';
+            if (method === 'GET') return LocalCoreInstance.getWrongPractice(zoneId, kind);
+            if (method === 'POST') return LocalCoreInstance.addWrongPractice(zoneId, kind);
           }
           if (sub === 'progress' && method === 'GET') return LocalCoreInstance.getProgress(zoneId);
           if (sub === 'levels' && p[3] && p[4] === 'start' && method === 'GET') {
             return LocalCoreInstance.startLevel(zoneId, Number(p[3]));
           }
+          if (sub === 'refine' && p[3]) {
+            if (p[3] === 'analyze' && method === 'POST') {
+              return LocalAIInstance.refineAnalyze(
+                zoneId,
+                body && body.onProgress,
+                (body && body.file_ids) || [],
+                body && body.speedRef
+              );
+            }
+            if (p[3] === 'extend' && method === 'POST') {
+              return LocalAIInstance.refineExtend(zoneId, (body && body.points) || [], body || {});
+            }
+            if (p[3] === 'decompose' && method === 'POST') {
+              return LocalAIInstance.refineDecompose(zoneId, (body && body.points) || [], body || {});
+            }
+          }
           throw new Error('未知学习区接口');
         }
 
         if (p[0] === 'cards') {
+          if (p[1] === 'toggle-favorite' && method === 'POST') {
+            return LocalCoreInstance.toggleFavorite(
+              Number(body && body.zone_id),
+              body && body.kind,
+              body && body.card_id
+            );
+          }
+          if (p[1] === 'delete' && method === 'POST') {
+            return LocalCoreInstance.deleteLibraryCards(
+              Number(body && body.zone_id),
+              body && body.kind,
+              (body && body.card_ids) || [],
+              !!(body && body.with_pair)
+            );
+          }
+          if (p[1] === 'study' && method === 'POST') {
+            return LocalCoreInstance.studyCards(
+              Number(body && body.zone_id),
+              body && body.kind,
+              (body && body.card_ids) || []
+            );
+          }
           if (p[1] === 'batch-delete' && method === 'POST') {
             return LocalCoreInstance.batchDeleteCards((body && body.card_ids) || []);
           }
@@ -201,6 +248,10 @@ const LocalAPI = {
           const cardId = p[1] ? Number(p[1]) : null;
           if (cardId && p[2] === 'answer' && method === 'POST') {
             return LocalCoreInstance.submitAnswer(cardId, body || {});
+          }
+          const memoryId = p[1];
+          if (memoryId && p[2] === 'memory-answer' && method === 'POST') {
+            return LocalCoreInstance.submitMemoryAnswer(memoryId, body || {});
           }
           throw new Error('未知卡片接口');
         }

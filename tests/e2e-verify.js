@@ -203,6 +203,60 @@ async function exportDownloadCheck(browser) {
   await context.close();
 }
 
+async function libraryFlowCheck(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.route('https://api.github.com/**', (route) => route.fulfill({ status: 204, body: '' }));
+  const errors = [];
+  page.on('pageerror', (err) => errors.push('pageerror: ' + err.message));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error' && !msg.text().includes('favicon')) {
+      errors.push('console: ' + msg.text());
+    }
+  });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(async () => {
+    const zone = await LocalCoreInstance.createZone('三库测试');
+    await LocalCoreInstance.addFile(zone.id, { filename: 'lib.txt', content: '库内容' });
+    await LocalCoreInstance.generateCard(
+      zone.id,
+      { title: '库测试卡', block_name: '区块A', difficulty: '中' },
+      {
+        question: '题干？',
+        option_a: 'A',
+        option_b: 'B',
+        option_c: 'C',
+        option_d: 'D',
+        answer: 'A',
+        explanation: '解析',
+        label: '常考'
+      },
+      1
+    );
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('.zone-card');
+  await page.waitForSelector('.library-tab');
+  const quizCount = await page.$$eval('.library-item', (els) => els.length);
+  if (quizCount < 1) throw new Error('quiz library empty');
+
+  await page.click('.library-tab[data-tab="memory"]');
+  await page.waitForSelector('.library-item');
+  const memoryKind = await page.textContent('.library-kind');
+  if (memoryKind.trim() !== '记忆') throw new Error('memory library kind wrong: ' + memoryKind);
+
+  await page.click('.library-fav');
+  await page.waitForSelector('.library-fav.fav-on');
+  await page.click('.library-tab[data-tab="favorites"]');
+  await page.waitForSelector('.library-item');
+
+  await page.click('.study-mode-btn[data-mode="memory"]');
+  await page.waitForSelector('.level-card');
+
+  if (errors.length) throw new Error('library console errors: ' + errors.join(' | '));
+  await context.close();
+}
+
 async function sampleImportCheck(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
@@ -217,8 +271,8 @@ async function sampleImportCheck(browser) {
   const name = await page.textContent('.zone-card-name');
   if (!name.includes('示例学习区')) throw new Error('sample import zone missing: ' + name);
   await page.click('.zone-card');
-  await page.waitForSelector('.card-item');
-  const cardCount = await page.$$eval('.card-item', (els) => els.length);
+  await page.waitForSelector('.library-item');
+  const cardCount = await page.$$eval('.library-item', (els) => els.length);
   if (cardCount < 3) throw new Error('sample import cards missing: ' + cardCount);
   await context.close();
 }
@@ -228,6 +282,7 @@ async function main() {
   try {
     await mobileLayoutCheck(browser);
     await desktopLayoutCheck(browser);
+    await libraryFlowCheck(browser);
     await toastAutoHideCheck(browser);
     await levelCompletionCheck(browser);
     await offlineCheck(browser);

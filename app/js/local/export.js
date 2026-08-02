@@ -16,8 +16,8 @@
     const data = await core.collectExportData();
     const zip = new JSZip();
     const manifest = {
-      format_version: 1,
-      app_version: '0.1.5',
+      format_version: 2,
+      app_version: '0.2.0',
       exported_at: new Date().toISOString(),
       export_type: 'full',
       source_app: 'ai-learn-local'

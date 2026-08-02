@@ -132,3 +132,115 @@ test('local AI analysis filters files and card generation batches', async () => 
     global.fetch = originalFetch;
   }
 });
+
+test('refine pipeline returns scope, extensions and decomposed tree', async () => {
+  const { core, zoneId } = await makeCore();
+  await core.addFile(zoneId, { filename: 'refine.txt', content: '精炼内容' });
+  const ai = LocalAI.create(core);
+  const originalFetch = global.fetch;
+  await core.updateSettings({ ai_api_key: 'local-test-key-123456' });
+  const providers = await core.listProviders();
+  await core.updateProvider(providers.providers[0].id, { models: [{ model: 'test-model' }] });
+
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const user = body.messages[1].content;
+    const text = Array.isArray(user)
+      ? (user.find((part) => part.type === 'text') || {}).text || ''
+      : user;
+    if (text.includes('最多补充')) {
+      return fakeResponse({
+        extensions: [
+          {
+            category: '实际应用/案例',
+            title: '精炼应用案例',
+            content: '案例内容',
+            reason: '帮助实际应用'
+          }
+        ]
+      });
+    }
+    if (text.includes('区块：')) {
+      return fakeResponse({
+        tree: [
+          {
+            name: '大结构A',
+            structures: [
+              {
+                name: '结构A',
+                blocks: [
+                  {
+                    name: '区块A',
+                    points: [{ title: '原子点', description: '原子说明', difficulty: '易' }]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      });
+    }
+    if (text.startsWith('知识点：')) {
+      return fakeResponse({
+        question: '题干',
+        options: ['A', 'B', 'C', 'D'],
+        answer: 'A',
+        explanation: '解析',
+        label: '常考'
+      });
+    }
+    return fakeResponse({
+      scope: '范围说明',
+      outline: ['1. 主题', '1.1 子主题'],
+      issues: [
+        {
+          source: '原文',
+          issue: '疑似错误',
+          reason: '理由',
+          suggestion: '建议'
+        }
+      ],
+      blocks: [
+        {
+          name: '区块',
+          points: [{ title: '精炼点', description: '说明', difficulty: '中' }]
+        }
+      ],
+      exam_questions: []
+    });
+  };
+
+  try {
+    const stage1 = await ai.refineAnalyze(zoneId, null, []);
+    assert.strictEqual(stage1.scope, '范围说明');
+    assert.deepStrictEqual(stage1.outline, ['1. 主题', '1.1 子主题']);
+    assert.strictEqual(stage1.issues.length, 1);
+    assert.strictEqual(stage1.knowledge_points.length, 1);
+
+    const stage2 = await ai.refineExtend(zoneId, stage1.knowledge_points, { max_items: 3 });
+    assert.strictEqual(stage2.extensions.length, 1);
+    assert.strictEqual(stage2.extensions[0].category, '实际应用/案例');
+    assert.strictEqual(stage2.extensions[0].title, '精炼应用案例');
+
+    const mergedPoints = [
+      ...stage1.knowledge_points,
+      ...stage2.extensions.map((e) => ({
+        title: e.title,
+        description: e.content,
+        block_name: e.category
+      }))
+    ];
+    const stage3 = await ai.refineDecompose(zoneId, mergedPoints);
+    assert.strictEqual(stage3.points.length, 1);
+    assert.strictEqual(stage3.points[0].path, '大结构A / 结构A / 区块A');
+
+    const result = await ai.generateCards(zoneId, stage3.points, null);
+    assert.strictEqual(result.generated, 1);
+    const memory = await core.memoryCardsByZone(zoneId);
+    assert.strictEqual(memory.length, 1);
+    assert.strictEqual(memory[0].path, '大结构A / 结构A / 区块A');
+    assert.strictEqual(memory[0].back_detail, '原子说明');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

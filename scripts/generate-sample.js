@@ -100,6 +100,62 @@ const data = {
       created_at: now
     }
   ],
+  memory_cards: [
+    {
+      id: 'm-1',
+      pair_card_id: 1,
+      zone_id: 1,
+      file_id: 1,
+      title: '动态类型',
+      back_detail: 'Python 是动态类型语言，变量的类型在运行时根据赋值确定。常用类型包括 int、float、str、bool、list、dict。',
+      learning_hint: '对比声明变量时是否写类型，判断语言是否动态类型。',
+      source_ref: 'Python快速入门.txt · 变量与类型',
+      path: 'Python 基础 / 语法基础 / 变量与类型',
+      block_name: '变量与类型',
+      difficulty: '易',
+      sort_order: 1,
+      favorite: 0,
+      status: '待学',
+      wrong_count: 0,
+      created_at: now
+    },
+    {
+      id: 'm-2',
+      pair_card_id: 2,
+      zone_id: 1,
+      file_id: 1,
+      title: '函数默认参数',
+      back_detail: '使用 def 定义函数，return 返回结果；默认参数写在参数名后并用等号赋值。',
+      learning_hint: '注意默认参数与关键字参数的区别。',
+      source_ref: 'Python快速入门.txt · 函数',
+      path: 'Python 基础 / 语法基础 / 函数',
+      block_name: '函数',
+      difficulty: '中',
+      sort_order: 2,
+      favorite: 0,
+      status: '待学',
+      wrong_count: 0,
+      created_at: now
+    },
+    {
+      id: 'm-3',
+      pair_card_id: 3,
+      zone_id: 1,
+      file_id: 1,
+      title: '__init__ 方法',
+      back_detail: '使用 class 定义类，__init__ 是构造方法，self 指向实例本身，创建实例时自动调用。',
+      learning_hint: '回想创建实例时哪个方法会被自动调用。',
+      source_ref: 'Python快速入门.txt · 类与对象',
+      path: 'Python 基础 / 面向对象 / 类与对象',
+      block_name: '类与对象',
+      difficulty: '难',
+      sort_order: 3,
+      favorite: 0,
+      status: '待学',
+      wrong_count: 0,
+      created_at: now
+    }
+  ],
   records: [],
   zone_settings: [
     {
@@ -108,6 +164,7 @@ const data = {
       daily_limit: 5,
       level_count: 3,
       sort_mode: 'easy_to_hard',
+      study_mode: 'quiz',
       updated_at: now
     }
   ],
@@ -166,8 +223,8 @@ const data = {
 };
 
 const manifest = {
-  format_version: 1,
-  app_version: '0.1.0',
+  format_version: 2,
+  app_version: '0.2.0',
   exported_at: date + 'T09:00:00+08:00',
   export_type: 'zone',
   source_app: 'ai-learn-local'

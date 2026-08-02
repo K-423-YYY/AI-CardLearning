@@ -1,6 +1,6 @@
 {
   "name": "ai-learn-local",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "private": true,
   "description": "AI 闯关学习 · 本地开源版",
   "scripts": {

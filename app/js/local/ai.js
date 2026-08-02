@@ -16,13 +16,34 @@
 
   const CARD_SYSTEM =
     '你是出题助手。根据给定的知识点生成一道四选一选择题。' +
-    '只输出一个 JSON 对象，格式：{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}。' +
+    '只输出一个 JSON 对象，格式：{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分", "hint": "一条学习提示（可选）"}。' +
     'answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。';
 
   const CARD_BATCH_SYSTEM =
     '你是出题助手。根据给定的多个知识点，为每个知识点生成一道四选一选择题。' +
-    '只输出一个 JSON 对象，格式：{"cards": [{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分"}]}。' +
+    '只输出一个 JSON 对象，格式：{"cards": [{"question": "题干", "options": ["选项A", "选项B", "选项C", "选项D"], "answer": "A", "explanation": "简短解析", "label": "必考或常考或加分", "hint": "一条学习提示（可选）"}]}。' +
     'cards 的数量必须与提供的知识点数量一致，顺序保持一致。answer 必须是 A/B/C/D 中的一个字母。不要输出 JSON 以外的任何文字。';
+
+  const REFINE_STAGE1_SYSTEM =
+    '你是知识精炼助手，负责学习资料的结构范围分析。请阅读用户上传的内容，输出：' +
+    '1. scope：一句话概括资料的知识领域、覆盖主题和深度；' +
+    '2. outline：章节大纲，用字符串数组表达原有章节逻辑和概念层级，允许用 "1.2 标题" 这类带层级的编号；' +
+    '3. issues：疑似错误清单，数组元素为 {"source": "原文依据", "issue": "疑似错误/矛盾/过时信息", "reason": "理由", "suggestion": "修改建议"}；没有发现问题时返回空数组；' +
+    '4. blocks 和 exam_questions：继续按标准知识点格式提取全部知识点。' +
+    '只输出一个 JSON 对象，格式：{"scope": "...", "outline": ["1. ...", "1.1 ..."], "issues": [{"source": "...", "issue": "...", "reason": "...", "suggestion": "..."}], "blocks": [{"name": "区块名", "points": [{"title": "知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}], "exam_questions": []}。' +
+    '不要输出 JSON 以外的任何文字。';
+
+  const REFINE_STAGE2_SYSTEM =
+    '你是知识延伸助手。根据用户已经确认的知识点，补充对学习和工作有实质帮助的延伸内容。' +
+    '只输出一个 JSON 对象，格式：{"extensions": [{"category": "关联高阶概念", "title": "条目标题", "content": "详细内容", "reason": "补充理由，说明对学习或工作的帮助"}]}。' +
+    'category 只能是 "关联高阶概念"、"实际应用/案例"、"前沿动态或易混淆辨析" 三者之一。' +
+    '条数不能超过用户要求的数量，没有合适内容时可以返回空数组。不要输出 JSON 以外的任何文字。';
+
+  const REFINE_STAGE3_SYSTEM =
+    '你是知识结构化拆解助手。请把用户提供的全部知识点拆成原子化条目（每条只表达一个可独立记忆、可验证的要点），' +
+    '再逐层聚合成 大结构 -> 结构 -> 区块 的三级知识树。' +
+    '只输出一个 JSON 对象，格式：{"tree": [{"name": "大结构名", "structures": [{"name": "结构名", "blocks": [{"name": "区块名", "points": [{"title": "原子知识点标题", "description": "一句话说明", "difficulty": "易或中或难"}]}]}]}]}。' +
+    '所有输入知识点都必须出现在树中，不得遗漏也不得凭空新增。不要输出 JSON 以外的任何文字。';
 
   const ANALYZE_CONCURRENCY = 5;
   const GENERATE_CONCURRENCY = 5;
@@ -141,7 +162,8 @@
       option_d: String(options[3]).trim(),
       answer,
       explanation: String((data && data.explanation) || '').trim(),
-      label: ['必考', '常考', '加分'].includes(label) ? label : '常考'
+      label: ['必考', '常考', '加分'].includes(label) ? label : '常考',
+      hint: String((data && data.hint) || '').trim()
     };
   }
 
@@ -338,6 +360,199 @@
       return result;
     }
 
+    function parseRefine(data, fileId) {
+      const points = parseBlocks(data, fileId);
+      return {
+        scope: String((data && data.scope) || '').trim(),
+        outline: Array.isArray(data && data.outline)
+          ? data.outline.map((item) => String(item).trim()).filter(Boolean)
+          : [],
+        issues: Array.isArray(data && data.issues)
+          ? data.issues.map((item) => ({
+              source: String((item && item.source) || '').trim(),
+              issue: String((item && item.issue) || '').trim(),
+              reason: String((item && item.reason) || '').trim(),
+              suggestion: String((item && item.suggestion) || '').trim()
+            })).filter((item) => item.issue)
+          : [],
+        points
+      };
+    }
+
+    async function refineAnalyze(zoneId, onProgress, fileIds, profileRef) {
+      const config = await core.getActiveAIConfig();
+      const files = await core.getZoneSourceFiles(zoneId, fileIds);
+      if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
+      const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+      const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
+      const currentProfile = () => (profileRef && profileRef.value) || profile;
+      const jobs = [];
+      files.forEach((f) => {
+        if (f.kind === 'image' || /^data:image\//.test(String(f.content || ''))) {
+          jobs.push({ image: String(f.content || ''), filename: f.filename, fileId: f.id });
+          return;
+        }
+        const text = String(f.content || '').slice(0, CHUNK_SIZE);
+        const content = `文件《${f.filename}》：\n${text}`;
+        splitText(content, CHUNK_SIZE).forEach((chunk) => {
+          jobs.push({ chunk, fileId: f.id });
+        });
+      });
+      const analyze = async (job) => {
+        const userContent = job.image
+          ? [
+              {
+                type: 'text',
+                text: `请分析这张图片《${job.filename}》，完成结构范围分析并提取全部核心知识点。`
+              },
+              { type: 'image_url', image_url: { url: job.image } }
+            ]
+          : job.chunk;
+        const data = await chatJson(config.api_key, config.base_url, config.model, [
+          { role: 'system', content: REFINE_STAGE1_SYSTEM },
+          { role: 'user', content: userContent }
+        ], 240000);
+        return parseRefine(data, job.fileId);
+      };
+      if (jobs.length === 1) {
+        const result = await analyze(jobs[0]);
+        if (onProgress) onProgress(1, 1);
+        return {
+          scope: result.scope,
+          outline: result.outline,
+          issues: result.issues,
+          knowledge_points: result.points
+        };
+      }
+      const queue = jobs.slice();
+      const merged = { scope: '', outline: [], issues: [], points: [] };
+      const seen = new Set();
+      let done = 0;
+      let activeWorkers = 0;
+      let resolveFinished;
+      const finished = new Promise((resolve) => { resolveFinished = resolve; });
+      const desired = () => Math.max(1, currentProfile().analyzeConcurrency || 1);
+      const maybeFinished = () => {
+        if (activeWorkers === 0 && queue.length === 0) resolveFinished();
+      };
+      const addResult = (result) => {
+        if (!merged.scope && result.scope) merged.scope = result.scope;
+        result.outline.forEach((item) => {
+          if (!merged.outline.includes(item)) merged.outline.push(item);
+        });
+        result.issues.forEach((item) => merged.issues.push(item));
+        result.points.forEach((p) => {
+          const key = `${p.block_name}::${p.title}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          merged.points.push(p);
+        });
+      };
+      const worker = async () => {
+        activeWorkers++;
+        try {
+          while (queue.length) {
+            if (activeWorkers > desired()) break;
+            const job = queue.shift();
+            addResult(await analyze(job));
+            done++;
+            if (onProgress) onProgress(done, jobs.length);
+          }
+        } finally {
+          activeWorkers--;
+          maybeFinished();
+        }
+      };
+      const ensureWorkers = () => {
+        while (activeWorkers < Math.min(desired(), jobs.length) && queue.length) {
+          worker();
+        }
+        maybeFinished();
+      };
+      ensureWorkers();
+      if (profileRef) {
+        profileRef.ensureWorkers = ensureWorkers;
+        profileRef.currentProfile = currentProfile;
+      }
+      await finished;
+      if (!merged.points.length) throw new AIError('AI 未能识别出知识点，请重试');
+      return {
+        scope: merged.scope,
+        outline: merged.outline,
+        issues: merged.issues,
+        knowledge_points: merged.points
+      };
+    }
+
+    async function refineExtend(zoneId, points, options) {
+      const config = await core.getActiveAIConfig();
+      const items = (points || []).filter((p) => p && p.title);
+      if (!items.length) throw new AIError('请先完成结构范围分析');
+      const limit = Math.max(1, Math.min(20, Number((options && options.max_items) || 8) || 8));
+      const text = items.map((p, i) => `${i + 1}. 知识点：${p.title}\n说明：${p.description || ''}`).join('\n');
+      const data = await chatJson(config.api_key, config.base_url, config.model, [
+        { role: 'system', content: REFINE_STAGE2_SYSTEM },
+        { role: 'user', content: `最多补充 ${limit} 条延伸内容。\n\n${text}` }
+      ], 240000);
+      const raw = Array.isArray(data && data.extensions) ? data.extensions : [];
+      const categories = ['关联高阶概念', '实际应用/案例', '前沿动态或易混淆辨析'];
+      return {
+        extensions: raw.slice(0, limit).map((item, idx) => ({
+          id: `ext-${idx + 1}`,
+          category: categories.includes(String(item && item.category || '').trim())
+            ? String(item.category).trim()
+            : '关联高阶概念',
+          title: String((item && item.title) || '').trim(),
+          content: String((item && item.content) || '').trim(),
+          reason: String((item && item.reason) || '').trim()
+        })).filter((item) => item.title)
+      };
+    }
+
+    function flattenRefineTree(tree, path, out) {
+      (Array.isArray(tree) ? tree : []).forEach((node) => {
+        const name = String((node && node.name) || '').trim() || '未命名';
+        const next = path.concat(name);
+        const structures = (node && node.structures) || [];
+        const blocks = (node && node.blocks) || [];
+        if (structures.length) {
+          flattenRefineTree(structures, next, out);
+        } else if (blocks.length) {
+          blocks.forEach((block) => {
+            const blockName = String((block && block.name) || '').trim() || '未分区';
+            const blockPath = next.concat(blockName);
+            (block.points || []).forEach((point) => {
+              if (point && point.title) {
+                out.push({
+                  title: String(point.title).trim(),
+                  description: String(point.description || ''),
+                  difficulty: normalizeDifficulty(point.difficulty),
+                  block_name: blockName,
+                  path: blockPath.join(' / ')
+                });
+              }
+            });
+          });
+        }
+      });
+      return out;
+    }
+
+    async function refineDecompose(zoneId, points, options) {
+      const config = await core.getActiveAIConfig();
+      const items = (points || []).filter((p) => p && p.title);
+      if (!items.length) throw new AIError('请先确认知识点与延伸内容');
+      const text = items.map((p, i) => `${i + 1}. 区块：${p.block_name || '未分区'}\n知识点：${p.title}\n说明：${p.description || ''}`).join('\n');
+      const data = await chatJson(config.api_key, config.base_url, config.model, [
+        { role: 'system', content: REFINE_STAGE3_SYSTEM },
+        { role: 'user', content: text }
+      ], 300000);
+      const tree = Array.isArray(data && data.tree) ? data.tree : [];
+      const pointsOut = flattenRefineTree(tree, [], []);
+      if (!pointsOut.length) throw new AIError('AI 未能完成结构化拆解，请重试');
+      return { tree, points: pointsOut };
+    }
+
     async function generateCards(zoneId, points, onProgress, profileRef) {
       const config = await core.getActiveAIConfig();
       if (!points || !points.length) throw new AIError('请先执行分析并确认知识点');
@@ -353,6 +568,10 @@
             return {
               title: String(point.title || '').trim(),
               description: String(point.description || ''),
+              back_detail: String(point.back_detail || '').trim(),
+              learning_hint: String(point.learning_hint || '').trim(),
+              source_ref: String(point.source_ref || '').trim(),
+              path: String(point.path || '').trim(),
               block_name: String(point.block_name || '').trim(),
               difficulty: normalizeDifficulty(point.difficulty),
               file_id: point.file_id ? Number(point.file_id) : undefined,
@@ -365,6 +584,10 @@
           return {
             title: String(point || '').trim(),
             description: '',
+            back_detail: '',
+            learning_hint: '',
+            source_ref: '',
+            path: '',
             block_name: '',
             difficulty: '中',
             file_id: undefined,
@@ -374,7 +597,6 @@
             exam_answer: ''
           };
         })
-        .filter((p) => p.title);
       const selectedFileIds = new Set(normalized.map((point) => point.file_id).filter(Boolean));
       const totalBytes = zoneFiles
         .filter((file) => (selectedFileIds.size ? selectedFileIds.has(file.id) : true))
@@ -554,7 +776,17 @@
       }
     }
 
-    return { analyzeZone, generateCards, listModels, testConnection, resolveSpeedProfile, AIError };
+    return {
+      analyzeZone,
+      refineAnalyze,
+      refineExtend,
+      refineDecompose,
+      generateCards,
+      listModels,
+      testConnection,
+      resolveSpeedProfile,
+      AIError
+    };
   }
 
   return { create, AIError };

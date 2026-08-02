@@ -15,6 +15,7 @@
     'zones',
     'files',
     'cards',
+    'memory_cards',
     'records',
     'provider_configs',
     'zone_settings',
