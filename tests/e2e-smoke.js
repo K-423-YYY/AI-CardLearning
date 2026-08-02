@@ -61,6 +61,7 @@ async function mobileFlow(browser) {
   await page.waitForSelector('#modal-confirm');
   await page.click('#modal-confirm');
   await page.waitForSelector('.ai-file-check:checked');
+  await page.waitForSelector('#ai-speed-select');
   await page.click('#btn-back-ai');
   await page.waitForSelector('.file-item');
 

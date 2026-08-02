@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=29">
+<link rel="stylesheet" href="./css/style.css?v=30">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -281,6 +281,17 @@
         <div class="ai-import-title">选择要分析的文件</div>
         <div id="ai-file-list" class="ai-select-list"></div>
       </div>
+      <div class="ai-speed-select">
+        <label for="ai-speed-select">AI 档位</label>
+        <select id="ai-speed-select">
+          <option value="auto">自动推荐</option>
+          <option value="1">普通</option>
+          <option value="5">5倍</option>
+          <option value="10">10倍</option>
+          <option value="20">20倍</option>
+        </select>
+        <div id="ai-speed-hint" class="ai-speed-hint"></div>
+      </div>
       <div id="ai-import-options" class="ai-import-options hidden">
         <div class="ai-import-title">旧卡片处理</div>
         <div class="ai-import-control">
@@ -523,7 +534,7 @@
 </div>
 
 <script src="./vendor/jszip.min.js"></script>
-<script src="./js/local/docx.js?v=29"></script>
+<script src="./js/local/docx.js?v=30"></script>
 <script>
   if (window.Capacitor && window.Capacitor.registerPlugin && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android') {
     window.AILearnDirectoryPicker = window.Capacitor.registerPlugin('AILearnDirectoryPicker');
@@ -534,19 +545,19 @@
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=29"></script>
-<script src="./js/local/db.js?v=29"></script>
-<script src="./js/local/core.js?v=29"></script>
-<script src="./js/local/ai.js?v=29"></script>
-<script src="./js/local/pdf.js?v=29"></script>
-<script src="./js/local/export.js?v=29"></script>
-<script src="./js/local/import.js?v=29"></script>
-<script src="./js/api.js?v=29"></script>
-<script src="./js/auth.js?v=29"></script>
-<script src="./js/zones.js?v=29"></script>
-<script src="./js/cards.js?v=29"></script>
-<script src="./js/settings.js?v=29"></script>
-<script src="./js/app.js?v=29"></script>
+<script src="./js/local/storage.js?v=30"></script>
+<script src="./js/local/db.js?v=30"></script>
+<script src="./js/local/core.js?v=30"></script>
+<script src="./js/local/ai.js?v=30"></script>
+<script src="./js/local/pdf.js?v=30"></script>
+<script src="./js/local/export.js?v=30"></script>
+<script src="./js/local/import.js?v=30"></script>
+<script src="./js/api.js?v=30"></script>
+<script src="./js/auth.js?v=30"></script>
+<script src="./js/zones.js?v=30"></script>
+<script src="./js/cards.js?v=30"></script>
+<script src="./js/settings.js?v=30"></script>
+<script src="./js/app.js?v=30"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

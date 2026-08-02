@@ -150,7 +150,12 @@ const LocalAPI = {
           if (sub === 'analyze' && method === 'POST') {
             const fileIds = (body && body.file_ids) || [];
             return {
-              knowledge_points: await LocalAIInstance.analyzeZone(zoneId, body && body.onProgress, fileIds)
+              knowledge_points: await LocalAIInstance.analyzeZone(
+                zoneId,
+                body && body.onProgress,
+                fileIds,
+                body && body.speedRef
+              )
             };
           }
           if (sub === 'generate' && method === 'POST') {
@@ -163,7 +168,12 @@ const LocalAPI = {
               await LocalCoreInstance.batchDeleteCards((body && body.delete_card_ids) || []);
             }
             const points = body && body.blocks !== undefined ? body.blocks : body && body.knowledge_points;
-            const result = await LocalAIInstance.generateCards(zoneId, points || [], body && body.onProgress);
+            const result = await LocalAIInstance.generateCards(
+              zoneId,
+              points || [],
+              body && body.onProgress,
+              body && body.speedRef
+            );
             await LocalCoreInstance.rebuildZoneLevels(zoneId, null, true);
             return result;
           }

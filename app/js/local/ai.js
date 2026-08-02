@@ -33,7 +33,7 @@
     { multiplier: 1, analyzeConcurrency: 1, generateConcurrency: 1, cardBatchSize: 1 },
     { multiplier: 5, analyzeConcurrency: 5, generateConcurrency: 5, cardBatchSize: 5 },
     { multiplier: 10, analyzeConcurrency: 10, generateConcurrency: 10, cardBatchSize: 10 },
-    { multiplier: 20, analyzeConcurrency: 20, generateConcurrency: 20, cardBatchSize: 20 }
+    { multiplier: 20, analyzeConcurrency: 20, generateConcurrency: 20, cardBatchSize: 10 }
   ];
 
   function resolveSpeedProfile(settings, totalBytes) {
@@ -244,12 +244,13 @@
       return result;
     }
 
-    async function analyzeZone(zoneId, onProgress, fileIds) {
+    async function analyzeZone(zoneId, onProgress, fileIds, profileRef) {
       const config = await core.getActiveAIConfig();
       const files = await core.getZoneSourceFiles(zoneId, fileIds);
       if (!files.length) throw new AIError('学习区还没有文件，请先上传文件');
       const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
       const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
+      const currentProfile = () => (profileRef && profileRef.value) || profile;
       const jobs = [];
       files.forEach((f) => {
         if (f.kind === 'image' || /^data:image\//.test(String(f.content || ''))) {
@@ -290,29 +291,54 @@
       const merged = new Map();
       const seen = new Set();
       let done = 0;
+      let activeWorkers = 0;
+      let resolveFinished;
+      const finished = new Promise((resolve) => { resolveFinished = resolve; });
+      const desired = () => Math.max(1, currentProfile().analyzeConcurrency || 1);
+      const maybeFinished = () => {
+        if (activeWorkers === 0 && queue.length === 0) resolveFinished();
+      };
       const worker = async () => {
-        while (queue.length) {
-          const job = queue.shift();
-          const points = await analyze(job);
-          points.forEach((p) => {
-            const key = `${p.block_name}::${p.title}`;
-            if (seen.has(key)) return;
-            seen.add(key);
-            if (!merged.has(p.block_name)) merged.set(p.block_name, []);
-            merged.get(p.block_name).push(p);
-          });
-          done++;
-          if (onProgress) onProgress(done, jobs.length);
+        activeWorkers++;
+        try {
+          while (queue.length) {
+            if (activeWorkers > desired()) break;
+            const job = queue.shift();
+            const points = await analyze(job);
+            points.forEach((p) => {
+              const key = `${p.block_name}::${p.title}`;
+              if (seen.has(key)) return;
+              seen.add(key);
+              if (!merged.has(p.block_name)) merged.set(p.block_name, []);
+              merged.get(p.block_name).push(p);
+            });
+            done++;
+            if (onProgress) onProgress(done, jobs.length);
+          }
+        } finally {
+          activeWorkers--;
+          maybeFinished();
         }
       };
-      await Promise.all(Array.from({ length: Math.min(profile.analyzeConcurrency, jobs.length) }, worker));
+      const ensureWorkers = () => {
+        while (activeWorkers < Math.min(desired(), jobs.length) && queue.length) {
+          worker();
+        }
+        maybeFinished();
+      };
+      ensureWorkers();
+      if (profileRef) {
+        profileRef.ensureWorkers = ensureWorkers;
+        profileRef.currentProfile = currentProfile;
+      }
+      await finished;
       const result = [];
       merged.forEach((points) => result.push(...points));
       if (!result.length) throw new AIError('AI 未能识别出知识点，请重试');
       return result;
     }
 
-    async function generateCards(zoneId, points, onProgress) {
+    async function generateCards(zoneId, points, onProgress, profileRef) {
       const config = await core.getActiveAIConfig();
       if (!points || !points.length) throw new AIError('请先执行分析并确认知识点');
       const zoneFiles = await core.getZoneSourceFiles(zoneId);
@@ -354,18 +380,19 @@
         .filter((file) => (selectedFileIds.size ? selectedFileIds.has(file.id) : true))
         .reduce((sum, file) => sum + (Number(file.size) || 0), 0);
       const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
+      const currentProfile = () => (profileRef && profileRef.value) || profile;
       let generated = 0;
       const failed = [];
       let done = 0;
-      const queue = [];
-      for (let i = 0; i < normalized.length; i += profile.cardBatchSize) {
-        queue.push(
-          normalized.slice(i, i + profile.cardBatchSize).map((point, offset) => ({
-            point,
-            sortOrder: i + offset + 1
-          }))
-        );
-      }
+      const indexed = normalized.map((point, index) => ({ point, sortOrder: index + 1 }));
+      let nextIndex = 0;
+      const takeBatch = () => {
+        if (nextIndex >= indexed.length) return null;
+        const size = Math.max(1, currentProfile().cardBatchSize || 1);
+        const batch = indexed.slice(nextIndex, nextIndex + size);
+        nextIndex += batch.length;
+        return batch;
+      };
       const generateOne = async (item) => {
         if (item.point.exam_options && item.point.exam_options.length >= 2) {
           return core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder);
@@ -415,9 +442,20 @@
         }
         return added;
       };
+      let activeWorkers = 0;
+      let resolveFinished;
+      const finished = new Promise((resolve) => { resolveFinished = resolve; });
+      const desired = () => Math.max(1, currentProfile().generateConcurrency || 1);
+      const maybeFinished = () => {
+        if (activeWorkers === 0 && nextIndex >= indexed.length) resolveFinished();
+      };
       const worker = async () => {
-        while (queue.length) {
-          const batch = queue.shift();
+        activeWorkers++;
+        try {
+          while (true) {
+            if (activeWorkers > desired()) break;
+            const batch = takeBatch();
+            if (!batch) break;
           try {
             generated += await generateBatch(batch);
           } catch (err) {
@@ -431,9 +469,24 @@
           }
           done += batch.length;
           if (onProgress) onProgress(done, normalized.length);
+          }
+        } finally {
+          activeWorkers--;
+          maybeFinished();
         }
       };
-      await Promise.all(Array.from({ length: Math.min(profile.generateConcurrency, queue.length) }, worker));
+      const ensureWorkers = () => {
+        while (activeWorkers < desired() && nextIndex < indexed.length) {
+          worker();
+        }
+        maybeFinished();
+      };
+      ensureWorkers();
+      if (profileRef) {
+        profileRef.ensureWorkers = ensureWorkers;
+        profileRef.currentProfile = currentProfile;
+      }
+      await finished;
       return { generated, failed, total: normalized.length };
     }
 

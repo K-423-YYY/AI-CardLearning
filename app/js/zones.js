@@ -2,6 +2,7 @@
 const Zones = {
   currentZoneId: null,
   pendingAnalyzeFileIds: null,
+  speedRef: null,
 
   // --- Home page: list all zones ---
   async renderHome() {
@@ -229,6 +230,8 @@ const Zones = {
       radio.addEventListener('change', () => this.toggleAiSelect());
     });
     await this.loadAiFiles(zoneId);
+    const fileIds = Array.from(document.querySelectorAll('.ai-file-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
+    await this.renderSpeedSelector(zoneId, fileIds);
   },
 
   async loadAiFiles(zoneId) {
@@ -283,7 +286,17 @@ const Zones = {
     }
   },
 
-  async speedTierLabelForFileIds(zoneId, fileIds) {
+  profileByMultiplier(multiplier) {
+    const profiles = {
+      1: { multiplier: 1, analyzeConcurrency: 1, generateConcurrency: 1, cardBatchSize: 1 },
+      5: { multiplier: 5, analyzeConcurrency: 5, generateConcurrency: 5, cardBatchSize: 5 },
+      10: { multiplier: 10, analyzeConcurrency: 10, generateConcurrency: 10, cardBatchSize: 10 },
+      20: { multiplier: 20, analyzeConcurrency: 20, generateConcurrency: 20, cardBatchSize: 10 }
+    };
+    return profiles[Number(multiplier)] || profiles[1];
+  },
+
+  async recommendedProfileForFileIds(zoneId, fileIds) {
     try {
       const [settings, zone] = await Promise.all([
         API.get('/api/settings'),
@@ -291,11 +304,38 @@ const Zones = {
       ]);
       const files = (zone.files || []).filter((f) => fileIds.includes(f.id));
       const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
-      const profile = LocalAIInstance.resolveSpeedProfile(settings, totalBytes);
-      return profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+      return { profile: LocalAIInstance.resolveSpeedProfile(settings, totalBytes), totalBytes };
     } catch (e) {
-      return '普通';
+      return { profile: this.profileByMultiplier(1), totalBytes: 0 };
     }
+  },
+
+  async renderSpeedSelector(zoneId, fileIds) {
+    const select = document.getElementById('ai-speed-select');
+    const hint = document.getElementById('ai-speed-hint');
+    if (!select || !hint) return;
+    const { profile, totalBytes } = await this.recommendedProfileForFileIds(zoneId, fileIds);
+    const recommended = profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+    const sizeLabel = totalBytes < 1024 ? `${totalBytes}B` : totalBytes < 1024 * 1024 ? `${Math.round(totalBytes / 1024)}KB` : `${(totalBytes / (1024 * 1024)).toFixed(1)}MB`;
+    select.value = 'auto';
+    hint.textContent = `推荐：${recommended}（文件约 ${sizeLabel}）。可手动切换，切换后剩余任务会使用新档位。`;
+    select.onchange = () => {
+      if (this.speedRef) {
+        const multiplier = select.value === 'auto'
+          ? profile.multiplier
+          : Number(select.value);
+        this.speedRef.value = this.profileByMultiplier(multiplier);
+        if (this.speedRef.ensureWorkers) this.speedRef.ensureWorkers();
+        const label = this.speedRef.value.multiplier === 1 ? '普通' : `${this.speedRef.value.multiplier}倍`;
+        hint.textContent = `已切换：${label}，剩余任务将按新档位执行。`;
+      }
+    };
+  },
+
+  selectedSpeedProfile() {
+    const select = document.getElementById('ai-speed-select');
+    if (!select) return this.profileByMultiplier(1);
+    return this.profileByMultiplier(select.value === 'auto' ? 1 : Number(select.value));
   },
 
   async handleAiAnalyze(zoneId) {
@@ -314,14 +354,21 @@ const Zones = {
     regenerateBtn.disabled = true;
     resultEl.classList.add('hidden');
     resultEl.innerHTML = '';
-    const tierLabel = await this.speedTierLabelForFileIds(zoneId, fileIds);
-    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位分析选中的文件并整理知识区块，请稍候...</div>`;
+    const rec = await this.recommendedProfileForFileIds(zoneId, fileIds);
+    const select = document.getElementById('ai-speed-select');
+    const profile = (!select || select.value === 'auto') ? rec.profile : this.profileByMultiplier(Number(select.value));
+    const speedRef = { value: profile };
+    this.speedRef = speedRef;
+    const tierLabel = profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+    const taskEstimate = Math.max(1, Math.ceil((rec.totalBytes || 0) / 60000));
+    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位分析选中的文件（约 ${taskEstimate} 个分析任务），请稍候...</div>`;
     if (progressWrap) progressWrap.classList.remove('hidden');
 
     try {
       const data = await API.post(`/api/zones/${zoneId}/analyze`, {
         file_ids: fileIds,
-        onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total)
+        speedRef,
+        onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total, `${tierLabel} 档`)
       });
       this.aiPoints = data.knowledge_points || [];
       if (progressWrap) progressWrap.classList.add('hidden');
@@ -365,13 +412,13 @@ const Zones = {
     }
   },
 
-  updateAiProgress(barId, textId, done, total) {
+  updateAiProgress(barId, textId, done, total, prefix) {
     const bar = document.getElementById(barId);
     const text = document.getElementById(textId);
     if (!bar || !text) return;
     const pct = total ? Math.round((done / total) * 100) : 0;
     bar.style.width = pct + '%';
-    text.textContent = `进度 ${done}/${total}（${pct}%）`;
+    text.textContent = `${prefix ? prefix + ' · ' : ''}进度 ${done}/${total}（${pct}%）`;
   },
 
   async handleAiGenerate(zoneId) {
@@ -382,8 +429,14 @@ const Zones = {
     confirmBtn.disabled = true;
     confirmBtn.textContent = '生成中...';
     const fileIds = Array.from(new Set((this.aiPoints || []).map((p) => p.file_id).filter(Boolean)));
-    const tierLabel = await this.speedTierLabelForFileIds(zoneId, fileIds);
-    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位生成卡片，每一条知识点一张卡片...</div>`;
+    const rec = await this.recommendedProfileForFileIds(zoneId, fileIds);
+    const select = document.getElementById('ai-speed-select');
+    const profile = (!select || select.value === 'auto') ? rec.profile : this.profileByMultiplier(Number(select.value));
+    const speedRef = { value: profile };
+    this.speedRef = speedRef;
+    const tierLabel = profile.multiplier === 1 ? '普通' : `${profile.multiplier}倍`;
+    const batchCount = Math.max(1, Math.ceil((this.aiPoints.length || 0) / profile.cardBatchSize));
+    chat.innerHTML += `<div class="ai-msg ai-msg-bot">正在按 ${tierLabel} 档位生成卡片（${this.aiPoints.length} 张，约 ${batchCount} 批），每一条知识点一张卡片...</div>`;
     if (progressWrap) progressWrap.classList.remove('hidden');
     const groups = {};
     this.aiPoints.forEach(p => {
@@ -398,7 +451,8 @@ const Zones = {
     try {
       const payload = { blocks, replace_old: replace };
       if (deleteIds.length) payload.delete_card_ids = deleteIds;
-      payload.onProgress = (done, total) => this.updateAiProgress('ai-gen-bar', 'ai-gen-text', done, total);
+      payload.speedRef = speedRef;
+      payload.onProgress = (done, total) => this.updateAiProgress('ai-gen-bar', 'ai-gen-text', done, total, `${tierLabel} 档 · ${batchCount} 批`);
       const data = await API.post(`/api/zones/${zoneId}/generate`, payload);
       if (progressWrap) progressWrap.classList.add('hidden');
       const failedCount = (data.failed || []).length;
