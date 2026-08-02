@@ -1780,6 +1780,15 @@
       if (!zoneOk) throw new LocalError(4040, '卡片不存在');
       card.favorite = card.favorite ? 0 : 1;
       await db.put(store, card);
+      const pairId = k === KIND_MEMORY ? card.pair_card_id : card.memory_card_id;
+      if (pairId) {
+        const pairStore = k === KIND_MEMORY ? 'cards' : 'memory_cards';
+        const pair = await db.get(pairStore, pairId);
+        if (pair) {
+          pair.favorite = card.favorite;
+          await db.put(pairStore, pair);
+        }
+      }
       return { favorite: card.favorite, id: cardId, kind: k };
     }
 
@@ -1858,6 +1867,114 @@
       return { cards, kind: k };
     }
 
+    async function reorderLibraryCards(zoneId, kind, orderedIds) {
+      await getZone(zoneId);
+      const k = kind === KIND_MEMORY ? KIND_MEMORY : KIND_QUIZ;
+      const store = k === KIND_MEMORY ? 'memory_cards' : 'cards';
+      const pairStore = k === KIND_MEMORY ? 'cards' : 'memory_cards';
+      let reordered = 0;
+      const ids = unique(orderedIds || []);
+      for (let index = 0; index < ids.length; index++) {
+        const id = ids[index];
+        const card = await db.get(store, id);
+        if (!card) continue;
+        const zoneOk = k === KIND_MEMORY
+          ? card.zone_id === zoneId
+          : (await db.where('files', (f) => f.zone_id === zoneId && f.id === card.file_id)).length > 0;
+        if (!zoneOk) continue;
+        card.sort_order = index + 1;
+        await db.put(store, card);
+        reordered++;
+        const pairId = k === KIND_MEMORY ? card.pair_card_id : card.memory_card_id;
+        if (pairId) {
+          const pair = await db.get(pairStore, pairId);
+          if (pair) {
+            pair.sort_order = index + 1;
+            await db.put(pairStore, pair);
+          }
+        }
+      }
+      return { reordered };
+    }
+
+    async function saveAIHistory(zoneId, type, payload) {
+      await getZone(zoneId);
+      const rows = await db.where('ai_history', (r) => r.zone_id === zoneId);
+      rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      if (rows.length >= 10) {
+        for (const row of rows.slice(9)) await db.delete('ai_history', row.id);
+      }
+      const id = `ai:${zoneId}:${Date.now()}`;
+      await db.put('ai_history', {
+        id,
+        zone_id: zoneId,
+        type,
+        payload,
+        created_at: nowStr()
+      });
+      return { id };
+    }
+
+    async function listAIHistory(zoneId) {
+      await getZone(zoneId);
+      const rows = await db.where('ai_history', (r) => r.zone_id === zoneId);
+      rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          type: r.type,
+          created_at: r.created_at,
+          summary: (r.payload && (r.payload.summary || r.payload.title || r.payload.name)) || ''
+        }))
+      };
+    }
+
+    async function getAIHistory(id) {
+      const row = await db.get('ai_history', id);
+      if (!row) throw new LocalError(4040, 'AI 历史记录不存在');
+      return row;
+    }
+
+    async function getCalendar(zoneIds) {
+      const s = (await db.get('settings', 'user_settings')) || {};
+      const selected = zoneIds && zoneIds.length ? zoneIds : (s.calendar_zones || []);
+      let zoneIdList = (await db.all('zones')).map((z) => z.id);
+      if (selected && selected.length) zoneIdList = zoneIdList.filter((id) => selected.includes(id));
+      const today = todayStr();
+      const year = Number(today.slice(0, 4));
+      const month = Number(today.slice(5, 7));
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const days = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const ds = `${year}-${pad(month)}-${pad(day)}`;
+        let done = false;
+        for (const zoneId of zoneIdList) {
+          if (await db.get('checkins', `c:${zoneId}:${ds}`)) {
+            done = true;
+            break;
+          }
+        }
+        days.push({ date: ds, day, done, future: ds > today });
+      }
+      return {
+        year,
+        month,
+        days,
+        zone_ids: zoneIdList,
+        notify_time: s.calendar_notify_time || '19:30',
+        notify_enabled: !!s.calendar_notify_enabled
+      };
+    }
+
+    async function updateCalendarSettings(body) {
+      const s = (await db.get('settings', 'user_settings')) || {};
+      if (body.zones !== undefined) s.calendar_zones = body.zones;
+      if (body.notify_time !== undefined) s.calendar_notify_time = String(body.notify_time);
+      if (body.notify_enabled !== undefined) s.calendar_notify_enabled = body.notify_enabled ? 1 : 0;
+      await db.put('settings', { id: 'user_settings', ...s });
+      return { saved: true };
+    }
+
     return {
       LocalError,
       AI_PROVIDERS,
@@ -1895,7 +2012,11 @@
       ensureTodayTasks,
 
       async listZones() {
-        const zones = (await db.all('zones')).sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '') || b.id - a.id);
+        const zones = (await db.all('zones')).sort((a, b) =>
+          ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) ||
+          (b.updated_at || '').localeCompare(a.updated_at || '') ||
+          b.id - a.id
+        );
         const result = [];
         for (const zone of zones) {
           const cards = await cardsByZone(zone.id);
@@ -1905,6 +2026,7 @@
             id: zone.id,
             name: zone.name,
             status: zone.status,
+            pinned: !!zone.pinned,
             created_at: zone.created_at,
             updated_at: zone.updated_at,
             daily_limit: await zoneLevelLimit(zone.id),
@@ -1922,10 +2044,25 @@
           user_id: 1,
           name: clean,
           status: '进行中',
+          pinned: 0,
           created_at: now,
           updated_at: now
         });
         return { id: zone.id, name: clean, status: '进行中' };
+      },
+
+      async setZonePinned(zoneId, pinned) {
+        const zone = await getZone(zoneId);
+        zone.pinned = pinned ? 1 : 0;
+        await db.put('zones', zone);
+        return { pinned: !!zone.pinned };
+      },
+
+      async deleteZone(zoneId) {
+        const zone = await getZone(zoneId);
+        await deleteZoneData(zoneId);
+        await db.delete('zones', zoneId);
+        return { deleted: true, name: zone.name };
       },
 
       async getZoneDetail(zoneId) {
@@ -1941,6 +2078,7 @@
         };
         const files = (await db.where('files', (f) => f.zone_id === zoneId)).sort((a, b) => a.id - b.id);
         const data = { ...zone };
+        data.pinned = !!zone.pinned;
         data.daily_limit = await zoneLevelLimit(zoneId);
         data.sort_mode = await zoneSortMode(zoneId);
         data.study_mode = kind;
@@ -1987,8 +2125,8 @@
           level_count: zs && zs.level_count ? zs.level_count : null,
           updated_at: nowStr()
         });
-        if (body.sort_mode !== undefined) {
-          await rebuildZoneLevels(zoneId, null, false, await zoneStudyMode(zoneId));
+        if (body.sort_mode !== undefined || (body.daily_card_limit !== undefined && body.rebuild_mode !== undefined)) {
+          await rebuildZoneLevels(zoneId, null, body.rebuild_mode === 'new', await zoneStudyMode(zoneId));
         }
         if (body.study_mode !== undefined && (await levelRows(zoneId, studyMode)).length === 0) {
           await rebuildZoneLevels(zoneId, null, false, studyMode);
@@ -2725,6 +2863,12 @@
       toggleFavorite,
       deleteLibraryCards,
       studyCards,
+      reorderLibraryCards,
+      saveAIHistory,
+      listAIHistory,
+      getAIHistory,
+      getCalendar,
+      updateCalendarSettings,
       submitMemoryAnswer,
       collectExportData,
       deleteZoneData,

@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./css/style.css?v=32">
+<link rel="stylesheet" href="./css/style.css?v=33">
 </head>
 <body>
 <aside id="sidebar" class="desktop-only">
@@ -162,9 +162,16 @@
     </header>
     <main class="main-content">
       <div class="desktop-hero hidden" id="desktop-hero"></div>
+      <div id="home-calendar" class="calendar-panel hidden"></div>
       <div class="section-header">
         <h2>我的学习区</h2>
         <button class="btn btn-primary btn-sm" id="btn-new-zone">+ 新建</button>
+      </div>
+      <div id="pinned-zone-section" class="pinned-zone-section hidden">
+        <div class="section-header">
+          <h3>📌 置顶学习区</h3>
+        </div>
+        <div id="pinned-zone-list" class="zone-list"></div>
       </div>
       <div id="zone-list" class="zone-list"></div>
       <div id="zone-empty" class="empty-state hidden">
@@ -186,6 +193,7 @@
     </header>
     <main class="main-content">
       <div class="zone-stats" id="zone-stats"></div>
+      <div id="zone-calendar" class="calendar-panel hidden"></div>
       <div class="zone-progress" id="zone-progress"></div>
       <div class="study-mode-row" id="study-mode-row">
         <span>关卡学习模式</span>
@@ -293,6 +301,10 @@
           <label for="refine-max-items">延伸补充条数上限</label>
           <input type="number" id="refine-max-items" min="1" max="20" value="8">
         </div>
+      </div>
+      <div id="ai-history-panel" class="ai-history-panel hidden">
+        <div class="ai-import-title">AI 分析历史（最近 10 次）</div>
+        <div id="ai-history-list" class="ai-select-list"></div>
       </div>
       <div class="ai-file-select">
         <div class="ai-import-title">选择要分析的文件</div>
@@ -535,7 +547,7 @@
 </div>
 
 <script src="./vendor/jszip.min.js"></script>
-<script src="./js/local/docx.js?v=32"></script>
+<script src="./js/local/docx.js?v=33"></script>
 <script>
   if (window.Capacitor && window.Capacitor.registerPlugin && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android') {
     window.AILearnDirectoryPicker = window.Capacitor.registerPlugin('AILearnDirectoryPicker');
@@ -546,20 +558,20 @@
   window.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.mjs';
 </script>
-<script src="./js/local/storage.js?v=32"></script>
-<script src="./js/local/db.js?v=32"></script>
-<script src="./js/local/core.js?v=32"></script>
-<script src="./js/local/ai.js?v=32"></script>
-<script src="./js/local/pdf.js?v=32"></script>
-<script src="./js/local/export.js?v=32"></script>
-<script src="./js/local/import.js?v=32"></script>
-<script src="./js/api.js?v=32"></script>
-<script src="./js/auth.js?v=32"></script>
-<script src="./js/zones.js?v=32"></script>
-<script src="./js/cards.js?v=32"></script>
-<script src="./js/library.js?v=32"></script>
-<script src="./js/settings.js?v=32"></script>
-<script src="./js/app.js?v=32"></script>
+<script src="./js/local/storage.js?v=33"></script>
+<script src="./js/local/db.js?v=33"></script>
+<script src="./js/local/core.js?v=33"></script>
+<script src="./js/local/ai.js?v=33"></script>
+<script src="./js/local/pdf.js?v=33"></script>
+<script src="./js/local/export.js?v=33"></script>
+<script src="./js/local/import.js?v=33"></script>
+<script src="./js/api.js?v=33"></script>
+<script src="./js/auth.js?v=33"></script>
+<script src="./js/zones.js?v=33"></script>
+<script src="./js/cards.js?v=33"></script>
+<script src="./js/library.js?v=33"></script>
+<script src="./js/settings.js?v=33"></script>
+<script src="./js/app.js?v=33"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

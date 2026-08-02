@@ -134,7 +134,13 @@ const LocalAPI = {
             throw new Error('不支持的请求');
           }
           const sub = p[2];
-          if (!sub) return LocalCoreInstance.getZoneDetail(zoneId);
+          if (!sub) {
+            if (method === 'DELETE') return LocalCoreInstance.deleteZone(zoneId);
+            return LocalCoreInstance.getZoneDetail(zoneId);
+          }
+          if (sub === 'pin' && method === 'POST') {
+            return LocalCoreInstance.setZonePinned(zoneId, !!(body && body.pinned));
+          }
           if (sub === 'settings' && method === 'PUT') {
             return LocalCoreInstance.updateZoneSettings(zoneId, body || {});
           }
@@ -194,6 +200,13 @@ const LocalAPI = {
             if (method === 'POST') return LocalCoreInstance.addWrongPractice(zoneId, kind);
           }
           if (sub === 'progress' && method === 'GET') return LocalCoreInstance.getProgress(zoneId);
+          if (sub === 'ai-history') {
+            if (p[3] && method === 'GET') return LocalCoreInstance.getAIHistory(p[3]);
+            if (method === 'GET') return LocalCoreInstance.listAIHistory(zoneId);
+            if (method === 'POST') {
+              return LocalCoreInstance.saveAIHistory(zoneId, (body && body.type) || 'analyze', (body && body.payload) || {});
+            }
+          }
           if (sub === 'levels' && p[3] && p[4] === 'start' && method === 'GET') {
             return LocalCoreInstance.startLevel(zoneId, Number(p[3]));
           }
@@ -222,6 +235,13 @@ const LocalAPI = {
               Number(body && body.zone_id),
               body && body.kind,
               body && body.card_id
+            );
+          }
+          if (p[1] === 'reorder' && method === 'POST') {
+            return LocalCoreInstance.reorderLibraryCards(
+              Number(body && body.zone_id),
+              body && body.kind,
+              (body && body.card_ids) || []
             );
           }
           if (p[1] === 'delete' && method === 'POST') {
@@ -254,6 +274,14 @@ const LocalAPI = {
             return LocalCoreInstance.submitMemoryAnswer(memoryId, body || {});
           }
           throw new Error('未知卡片接口');
+        }
+
+        if (p[0] === 'calendar') {
+          if (method === 'GET') {
+            const zoneId = queryParams(url).get('zone_id');
+            return LocalCoreInstance.getCalendar(zoneId ? [Number(zoneId)] : []);
+          }
+          if (method === 'PUT') return LocalCoreInstance.updateCalendarSettings(body || {});
         }
 
         if (p[0] === 'settings') {

@@ -6,7 +6,7 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   const DB_NAME = 'ai-learn-local';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
 
   const STORES = [
     'settings',
@@ -23,7 +23,8 @@
     'level_cards',
     'review_schedule',
     'daily_tasks',
-    'checkins'
+    'checkins',
+    'ai_history'
   ];
 
   function open() {

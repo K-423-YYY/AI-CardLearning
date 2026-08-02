@@ -500,8 +500,8 @@ test('library list supports favorite pinning and keyword search', async () => {
   assert.strictEqual(filtered.cards[0].title, '闭包与函数');
 
   const favorites = await core.listLibraryCards(zoneId, 'favorites');
-  assert.strictEqual(favorites.cards.length, 1);
-  assert.strictEqual(favorites.cards[0].title, '闭包与函数');
+  assert.strictEqual(favorites.cards.length, 2);
+  assert.strictEqual(favorites.cards.some((c) => c.title === '闭包与函数'), true);
 });
 
 test('library delete removes current kind only unless pair is requested', async () => {

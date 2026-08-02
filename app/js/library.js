@@ -67,7 +67,16 @@ const Library = {
         this.load(zoneId, container);
       }, 250);
     });
-    container.querySelector('.library-menu-btn').addEventListener('click', () => this.showMenu(zoneId, container));
+    container.querySelector('.library-menu-btn').addEventListener('click', () => {
+      if (this.selectionMode) {
+        this.selectionMode = false;
+        this.selectionAction = null;
+        this.selected = new Set();
+        this.load(zoneId, container);
+      } else {
+        this.showMenu(zoneId, container);
+      }
+    });
     await this.load(zoneId, container);
   },
 
@@ -88,7 +97,24 @@ const Library = {
       }
       emptyEl.classList.add('hidden');
       if (actionBar) actionBar.classList.toggle('hidden', !this.selectionMode);
-      listEl.innerHTML = cards.map((c) => this.cardHtml(c)).join('');
+      if (this.tab === 'favorites') {
+        const quizCards = cards.filter((c) => c.kind !== 'memory');
+        const memoryCards = cards.filter((c) => c.kind === 'memory');
+        listEl.innerHTML = `
+          <div class="library-columns">
+            <div class="library-col">
+              <div class="library-col-title">闯关卡区</div>
+              ${quizCards.length ? quizCards.map((c) => this.cardHtml(c)).join('') : '<div class="ai-select-empty">暂无收藏闯关卡</div>'}
+            </div>
+            <div class="library-col">
+              <div class="library-col-title">知识卡区</div>
+              ${memoryCards.length ? memoryCards.map((c) => this.cardHtml(c)).join('') : '<div class="ai-select-empty">暂无收藏知识卡</div>'}
+            </div>
+          </div>
+        `;
+      } else {
+        listEl.innerHTML = cards.map((c) => this.cardHtml(c)).join('');
+      }
       this.bindList(zoneId, container, cards);
     } catch (e) {
       listEl.innerHTML = `<div class="empty-state"><p>${Utils.esc(e.message)}</p></div>`;
@@ -119,8 +145,9 @@ const Library = {
       `;
     }
     return `
-      <div class="library-item">
+      <div class="library-item" draggable="true" data-id="${Utils.esc(String(c.id))}" data-kind="${c.kind}">
         ${checkbox}
+        <span class="drag-handle" title="拖动排序">⋮⋮</span>
         <div class="library-item-body">
           <div class="library-item-head">
             <span class="library-kind" data-kind="${c.kind}">${kindTag}</span>
@@ -136,6 +163,39 @@ const Library = {
 
   bindList(zoneId, container, cards) {
     const listEl = container.querySelector('.library-list');
+    listEl.querySelectorAll('.library-item[draggable]').forEach((item) => {
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', item.dataset.id);
+        e.dataTransfer.setData('kind', item.dataset.kind);
+      });
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        const draggedId = e.dataTransfer.getData('text/plain');
+        const kind = e.dataTransfer.getData('kind') || item.dataset.kind;
+        if (!draggedId || kind !== item.dataset.kind) return;
+        const section = item.parentElement;
+        if (!section || !section.classList.contains('library-col')) return;
+        const ids = Array.from(section.querySelectorAll('.library-item')).map((el) => el.dataset.id);
+        const fromIndex = ids.indexOf(draggedId);
+        const toIndex = ids.indexOf(item.dataset.id);
+        if (fromIndex < 0 || toIndex < 0) return;
+        ids.splice(fromIndex, 1);
+        ids.splice(toIndex, 0, draggedId);
+        try {
+          await API.post('/api/cards/reorder', {
+            zone_id: zoneId,
+            kind,
+            card_ids: ids
+          });
+          await this.load(zoneId, container);
+        } catch (err) {
+          Toast.show(err.message, 'error');
+        }
+      });
+    });
     listEl.querySelectorAll('.library-fav').forEach((btn) => {
       btn.addEventListener('click', async () => {
         try {

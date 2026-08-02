@@ -14,40 +14,66 @@ const Zones = {
       const list = data.zones || [];
       const listEl = document.getElementById('zone-list');
       const emptyEl = document.getElementById('zone-empty');
+      const pinnedSection = document.getElementById('pinned-zone-section');
+      const pinnedList = document.getElementById('pinned-zone-list');
+      const pinned = list.filter(z => z.pinned);
+      const normal = list.filter(z => !z.pinned);
 
       if (list.length === 0) {
         listEl.innerHTML = '';
         emptyEl.classList.remove('hidden');
+        if (pinnedSection) pinnedSection.classList.add('hidden');
       } else {
         emptyEl.classList.add('hidden');
-        listEl.innerHTML = list.map(z => `
-          <div class="zone-card" data-zone-id="${z.id}">
-            <div class="zone-card-top">
-              <span class="zone-card-name">${Utils.esc(z.name)}</span>
-              <span class="zone-card-status ${z.status === '已完成' ? 'status-done' : 'status-active'}">${Utils.esc(z.status)}</span>
-            </div>
-            <div class="zone-card-meta">
-              <span>卡片 ${z.card_count || 0}</span>
-              <span>已通关 ${z.success_count || 0}</span>
-              <span>${Utils.timeAgo(z.updated_at)}</span>
-            </div>
-          </div>
-        `).join('');
-
-        listEl.querySelectorAll('.zone-card').forEach(card => {
-          card.addEventListener('click', () => {
-            this.currentZoneId = parseInt(card.dataset.zoneId);
-            App.navigate('zone', this.currentZoneId);
-          });
-        });
+        if (pinnedSection && pinnedList) {
+          if (pinned.length) {
+            pinnedSection.classList.remove('hidden');
+            pinnedList.innerHTML = pinned.map(z => this.zoneCardHtml(z)).join('');
+            this.bindZoneCards(pinnedList);
+          } else {
+            pinnedSection.classList.add('hidden');
+          }
+        }
+        listEl.innerHTML = normal.map(z => this.zoneCardHtml(z)).join('');
+        this.bindZoneCards(listEl);
       }
 
       document.getElementById('btn-new-zone').onclick = () => this.showCreateModal();
       document.getElementById('btn-settings').onclick = () => App.navigate('settings');
       document.getElementById('btn-logout').onclick = () => this.handleLogout();
       this.renderDesktopHero(list);
+      await this.renderCalendar('home-calendar', null);
     } catch (e) {
       Toast.show(e.message, 'error');
+    }
+  },
+
+  async renderCalendar(containerId, zoneId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    try {
+      const data = await API.get(`/api/calendar${zoneId ? `?zone_id=${zoneId}` : ''}`);
+      const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+      const firstWeekday = new Date(data.year, data.month - 1, 1).getDay();
+      const cells = [];
+      for (let i = 0; i < firstWeekday; i++) cells.push('<span class="cal-empty"></span>');
+      cells.push(...data.days.map((d) => `
+        <span class="cal-day ${d.done ? 'done' : d.future ? 'future' : 'miss'}">${d.day}${d.done ? ' ✓' : d.future ? '' : ' ✕'}</span>
+      `));
+      el.innerHTML = `
+        <div class="calendar-card">
+          <div class="calendar-head">
+            <strong>${data.year} 年 ${data.month} 月</strong>
+            <span class="streak">🔥 学习日历</span>
+          </div>
+          <div class="cal-weekdays">${weekdayNames.map((n) => `<span>${n}</span>`).join('')}</div>
+          <div class="cal-grid">${cells.join('')}</div>
+          <div class="calendar-foot">✓ 当天完成至少一个关卡 · ✕ 当天未完成</div>
+        </div>
+      `;
+      el.classList.remove('hidden');
+    } catch (e) {
+      el.classList.add('hidden');
     }
   },
 
@@ -184,6 +210,79 @@ const Zones = {
     };
   },
 
+  zoneCardHtml(z) {
+    return `
+      <div class="zone-card-wrap ${z.pinned ? 'pinned' : ''}" data-zone-id="${z.id}">
+        <div class="zone-actions">
+          <button class="zone-action-pin" data-act="pin" data-id="${z.id}">${z.pinned ? '取消置顶' : '置顶'}</button>
+          <button class="zone-action-delete" data-act="delete" data-id="${z.id}">删除</button>
+        </div>
+        <div class="zone-card">
+          <div class="zone-card-top">
+            <span class="zone-card-name">${Utils.esc(z.name)}</span>
+            <span class="zone-card-status ${z.status === '已完成' ? 'status-done' : 'status-active'}">${Utils.esc(z.status)}</span>
+          </div>
+          <div class="zone-card-meta">
+            <span>卡片 ${z.card_count || 0}</span>
+            <span>已通关 ${z.success_count || 0}</span>
+            <span>${Utils.timeAgo(z.updated_at)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  bindZoneCards(container) {
+    container.querySelectorAll('.zone-card-wrap').forEach(wrap => {
+      const zoneId = parseInt(wrap.dataset.zoneId, 10);
+      wrap.querySelector('.zone-card').addEventListener('click', () => {
+        this.currentZoneId = zoneId;
+        App.navigate('zone', zoneId);
+      });
+      wrap.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        wrap.classList.toggle('show-actions');
+      });
+      let touchStartX = null;
+      wrap.addEventListener('touchstart', (e) => {
+        touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+      wrap.addEventListener('touchend', (e) => {
+        if (touchStartX === null) return;
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        if (dx > 40) wrap.classList.add('show-actions');
+        if (dx < -40) wrap.classList.remove('show-actions');
+        touchStartX = null;
+      });
+      document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target)) wrap.classList.remove('show-actions');
+      });
+      wrap.querySelectorAll('[data-act]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const act = btn.dataset.act;
+          if (act === 'pin') {
+            try {
+              await API.post(`/api/zones/${zoneId}/pin`, { pinned: !wrap.classList.contains('pinned') });
+              this.renderHome();
+            } catch (err) {
+              Toast.show(err.message, 'error');
+            }
+          } else if (act === 'delete') {
+            if (!window.confirm('确定删除该学习区？学习区、卡片和进度会一并清空。')) return;
+            try {
+              await API.delete(`/api/zones/${zoneId}`);
+              Toast.show('学习区已删除', 'success');
+              this.renderHome();
+            } catch (err) {
+              Toast.show(err.message, 'error');
+            }
+          }
+        });
+      });
+    });
+  },
+
   showAnalyzePrompt(zoneId) {
     const modal = document.getElementById('modal');
     const box = document.getElementById('modal-box');
@@ -251,6 +350,120 @@ const Zones = {
     await this.loadAiFiles(zoneId);
     const fileIds = Array.from(document.querySelectorAll('.ai-file-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
     await this.renderSpeedSelector(zoneId, fileIds);
+    await this.loadAIHistory(zoneId);
+  },
+
+  async loadAIHistory(zoneId) {
+    const panel = document.getElementById('ai-history-panel');
+    const list = document.getElementById('ai-history-list');
+    if (!panel || !list) return;
+    try {
+      const data = await API.get(`/api/zones/${zoneId}/ai-history`);
+      const items = data.items || [];
+      if (!items.length) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      list.innerHTML = items.map((item) => `
+        <div class="ai-history-item">
+          <span style="flex:1">${Utils.esc(item.created_at || '')} · ${Utils.esc(item.type || '')} · ${Utils.esc(item.summary || '')}</span>
+          <button class="btn btn-outline btn-sm" data-history-view="${Utils.esc(item.id)}">查看记录</button>
+          <button class="btn btn-primary btn-sm" data-history-use="${Utils.esc(item.id)}">直接使用</button>
+        </div>
+      `).join('');
+      list.querySelectorAll('[data-history-view]').forEach((btn) => {
+        btn.onclick = async () => {
+          try {
+            const row = await API.get(`/api/zones/${zoneId}/ai-history/${btn.dataset.historyView}`);
+            this.showAIHistoryModal(row);
+          } catch (e) {
+            Toast.show(e.message, 'error');
+          }
+        };
+      });
+      list.querySelectorAll('[data-history-use]').forEach((btn) => {
+        btn.onclick = async () => {
+          try {
+            const row = await API.get(`/api/zones/${zoneId}/ai-history/${btn.dataset.historyUse}`);
+            this.applyAIHistory(zoneId, row.payload || {});
+          } catch (e) {
+            Toast.show(e.message, 'error');
+          }
+        };
+      });
+    } catch (e) {
+      panel.classList.add('hidden');
+    }
+  },
+
+  showAIHistoryModal(row) {
+    const modal = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    const preview = JSON.stringify(row.payload || {}, null, 2).slice(0, 2000);
+    box.innerHTML = `
+      <h3>AI 历史记录</h3>
+      <p class="muted" style="font-size:0.85rem">${Utils.esc(row.created_at || '')} · ${Utils.esc(row.type || '')}</p>
+      <pre style="white-space:pre-wrap;word-break:break-all;font-size:0.75rem;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:10px;">${Utils.esc(preview)}</pre>
+      <div class="modal-actions">
+        <button class="btn btn-outline btn-sm" id="modal-cancel">关闭</button>
+        <button class="btn btn-primary btn-sm" id="modal-use-history">使用此版本</button>
+      </div>
+    `;
+    modal.classList.remove('hidden');
+    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
+    document.getElementById('modal-use-history').onclick = () => {
+      modal.classList.add('hidden');
+      this.applyAIHistory(this.currentZoneId, row.payload || {});
+    };
+  },
+
+  applyAIHistory(zoneId, payload) {
+    if (payload.knowledge_points && Array.isArray(payload.knowledge_points)) {
+      this.aiPoints = payload.knowledge_points;
+      this.renderAiResult(zoneId);
+      Toast.show('已使用该 AI 历史版本', 'success');
+    } else {
+      Toast.show('该历史记录暂不支持一键使用', 'error');
+    }
+  },
+
+  renderAiResult(zoneId) {
+    const resultEl = document.getElementById('ai-result');
+    if (!resultEl) return;
+    const groups = {};
+    this.aiPoints.forEach(p => {
+      const block = p.block_name || '全部知识点';
+      (groups[block] = groups[block] || []).push(p);
+    });
+    resultEl.innerHTML = Object.entries(groups).map(([block, points]) => `
+      <div class="ai-block">
+        <div class="ai-block-head">${Utils.esc(block)} <span>${points.length} 个知识点</span></div>
+        ${points.map(p => `
+          <div class="ai-point">
+            <span class="ai-difficulty diff-${({ '易': 'easy', '中': 'mid', '难': 'hard' })[p.difficulty] || 'mid'}">${Utils.esc(p.difficulty || '中')}</span>
+            <div>
+              <div class="ai-point-title">${Utils.esc(p.title)}</div>
+              <div class="ai-point-desc">${Utils.esc(p.description || '')}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+    resultEl.classList.remove('hidden');
+    document.getElementById('ai-import-options').classList.remove('hidden');
+    document.getElementById('btn-ai-confirm').classList.remove('hidden');
+    document.getElementById('btn-ai-analyze').classList.add('hidden');
+    document.getElementById('btn-ai-regenerate').classList.remove('hidden');
+  },
+
+  async saveAIHistory(zoneId, type, payload) {
+    try {
+      await API.post(`/api/zones/${zoneId}/ai-history`, { type, payload });
+      await this.loadAIHistory(zoneId);
+    } catch (e) {
+      // history is best-effort
+    }
   },
 
   async loadAiFiles(zoneId) {
@@ -393,6 +606,10 @@ const Zones = {
         onProgress: (done, total) => this.updateAiProgress('ai-analyze-bar', 'ai-analyze-text', done, total, `${tierLabel} 档`)
       });
       this.aiPoints = data.knowledge_points || [];
+      this.saveAIHistory(zoneId, 'analyze', {
+        knowledge_points: this.aiPoints,
+        summary: `${this.aiPoints.length} 条知识点`
+      });
       if (progressWrap) progressWrap.classList.add('hidden');
       if (this.aiPoints.length === 0) {
         chat.innerHTML += '<div class="ai-msg ai-msg-bot">没有识别到知识点，请换一份资料重试。</div>';
@@ -526,6 +743,7 @@ const Zones = {
         ${issuesHtml}
       </div>
       <div class="refine-actions">
+        <button class="btn btn-outline btn-block" id="btn-refine-stage1-regenerate">重新生成第一阶段</button>
         <button class="btn btn-primary btn-block" id="btn-refine-stage2">确认结构，进入延伸补充</button>
       </div>
     `;
@@ -539,6 +757,7 @@ const Zones = {
       });
     });
     document.getElementById('btn-refine-stage2').onclick = () => this.handleRefineStage2(zoneId);
+    document.getElementById('btn-refine-stage1-regenerate').onclick = () => this.handleRefineStage1(zoneId);
   },
 
   async handleRefineStage2(zoneId) {
@@ -584,6 +803,7 @@ const Zones = {
         ${itemsHtml}
       </div>
       <div class="refine-actions">
+        <button class="btn btn-outline btn-block" id="btn-refine-stage2-regenerate">重新生成第二阶段</button>
         <button class="btn btn-outline btn-block" id="btn-refine-skip-ext">整块跳过</button>
         <button class="btn btn-primary btn-block" id="btn-refine-stage3">确认延伸，进入结构化拆解</button>
       </div>
@@ -600,6 +820,7 @@ const Zones = {
       this.handleRefineStage3(zoneId);
     };
     document.getElementById('btn-refine-stage3').onclick = () => this.handleRefineStage3(zoneId);
+    document.getElementById('btn-refine-stage2-regenerate').onclick = () => this.handleRefineStage2(zoneId);
   },
 
   async handleRefineStage3(zoneId) {
@@ -641,6 +862,7 @@ const Zones = {
         </div>
       </div>
       <div class="refine-actions">
+        <button class="btn btn-outline btn-block" id="btn-refine-stage3-regenerate">重新生成第三阶段</button>
         <button class="btn btn-success btn-block" id="btn-refine-generate">确认排序并生成卡片</button>
       </div>
     `;
@@ -652,6 +874,7 @@ const Zones = {
       });
     });
     document.getElementById('btn-refine-generate').onclick = () => this.handleRefineGenerate(zoneId);
+    document.getElementById('btn-refine-stage3-regenerate').onclick = () => this.handleRefineStage3(zoneId);
   },
 
   refineTreeHtml(tree) {
@@ -699,6 +922,10 @@ const Zones = {
       );
     }
     this.aiPoints = points;
+    await this.saveAIHistory(zoneId, 'refine', {
+      knowledge_points: points,
+      summary: `${points.length} 条精炼知识点`
+    });
     await this.handleAiGenerate(zoneId);
   },
 
@@ -781,6 +1008,7 @@ const Zones = {
       `;
       this.renderStudyMode(zoneId, zone.study_mode || 'quiz');
       await this.loadProgress(zoneId);
+      await this.renderCalendar('zone-calendar', zoneId);
 
       // File list
       const fileList = document.getElementById('file-list');
@@ -968,6 +1196,44 @@ const Zones = {
   },
 
   // Level progress, check-in, review and per-zone daily limit
+  askRebuildMode(zoneId, body) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('modal');
+      const box = document.getElementById('modal-box');
+      box.innerHTML = `
+        <h3>选择关卡处理方式</h3>
+        <p style="font-size:0.9rem;color:#64748b;margin-bottom:12px;">修改排序或每日卡片数会生成新的关卡布局，请选择处理方式。</p>
+        <div class="modal-actions" style="justify-content:center">
+          <button class="btn btn-outline btn-sm" id="modal-new-levels">新建后续关卡</button>
+          <button class="btn btn-primary btn-sm" id="modal-overwrite-levels">覆盖原有关卡</button>
+        </div>
+      `;
+      modal.classList.remove('hidden');
+      document.getElementById('modal-new-levels').onclick = async () => {
+        modal.classList.add('hidden');
+        try {
+          await API.put(`/api/zones/${zoneId}/settings`, { ...body, rebuild_mode: 'new' });
+          Toast.show('已新建后续关卡', 'success');
+          resolve(true);
+        } catch (e) {
+          Toast.show(e.message, 'error');
+          resolve(false);
+        }
+      };
+      document.getElementById('modal-overwrite-levels').onclick = async () => {
+        modal.classList.add('hidden');
+        try {
+          await API.put(`/api/zones/${zoneId}/settings`, { ...body, rebuild_mode: 'overwrite' });
+          Toast.show('已覆盖原有关卡', 'success');
+          resolve(true);
+        } catch (e) {
+          Toast.show(e.message, 'error');
+          resolve(false);
+        }
+      };
+    });
+  },
+
   async loadProgress(zoneId) {
     try {
       const p = await API.get(`/api/zones/${zoneId}/progress`);
@@ -1063,13 +1329,8 @@ const Zones = {
         btn.addEventListener('click', async () => {
           const mode = btn.dataset.mode;
           if (mode === p.sort_mode) return;
-          try {
-            await API.put(`/api/zones/${zoneId}/settings`, { sort_mode: mode });
-            Toast.show('排序模式已保存，关卡已重新排版', 'success');
-            await this.loadProgress(zoneId);
-          } catch (e) {
-            Toast.show(e.message, 'error');
-          }
+          const ok = await this.askRebuildMode(zoneId, { sort_mode: mode });
+          if (ok) await this.loadProgress(zoneId);
         });
       });
       document.getElementById('btn-save-zone-limit').onclick = async () => {
@@ -1078,13 +1339,8 @@ const Zones = {
           Toast.show('请输入 1-100 的卡片数', 'error');
           return;
         }
-        try {
-          await API.put(`/api/zones/${zoneId}/settings`, { daily_card_limit: limit });
-          Toast.show('每日卡片数已保存', 'success');
-          await this.loadProgress(zoneId);
-        } catch (e) {
-          Toast.show(e.message, 'error');
-        }
+        const ok = await this.askRebuildMode(zoneId, { daily_card_limit: limit });
+        if (ok) await this.loadProgress(zoneId);
       };
       if (hasLayout) {
         document.getElementById('btn-save-level-count').onclick = async () => {
