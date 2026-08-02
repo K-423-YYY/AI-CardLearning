@@ -69,8 +69,31 @@ const Zones = {
           <div class="cal-weekdays">${weekdayNames.map((n) => `<span>${n}</span>`).join('')}</div>
           <div class="cal-grid">${cells.join('')}</div>
           <div class="calendar-foot">✓ 当天完成至少一个关卡 · ✕ 当天未完成</div>
+          ${containerId === 'home-calendar' ? `
+            <div class="calendar-notify">
+              <label>提醒时间 <input type="time" id="calendar-notify-time" value="${Utils.esc(data.notify_time || '19:30')}"></label>
+              <label><input type="checkbox" id="calendar-notify-enabled" ${data.notify_enabled ? 'checked' : ''}> 开启每日提醒</label>
+              <button class="btn btn-outline btn-sm" id="btn-save-calendar-notify">保存提醒</button>
+            </div>
+          ` : ''}
         </div>
       `;
+      const notifyBtn = el.querySelector('#btn-save-calendar-notify');
+      if (notifyBtn) {
+        notifyBtn.onclick = async () => {
+          try {
+            const enabled = !!el.querySelector('#calendar-notify-enabled').checked;
+            const time = el.querySelector('#calendar-notify-time').value || '19:30';
+            await API.put('/api/calendar', { notify_time: time, notify_enabled: enabled });
+            if (enabled && typeof Notification !== 'undefined' && Notification.requestPermission) {
+              await Notification.requestPermission();
+            }
+            Toast.show('日历提醒设置已保存', 'success');
+          } catch (e) {
+            Toast.show(e.message, 'error');
+          }
+        };
+      }
       el.classList.remove('hidden');
     } catch (e) {
       el.classList.add('hidden');

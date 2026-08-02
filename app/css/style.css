@@ -308,6 +308,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .cal-day.miss { background: #fecaca; color: #7f1d1d; border-color: #fca5a5; }
 .cal-day.future { color: #94a3b8; }
 .calendar-foot { margin-top: 8px; font-size: 0.72rem; color: #566779; }
+.calendar-notify { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 0.78rem; }
 .level-card {
   background: #fff; border-radius: 14px; padding: 16px;
   box-shadow: 0 8px 28px rgba(30, 41, 59, 0.08); border: 1px solid #eef2ff;
