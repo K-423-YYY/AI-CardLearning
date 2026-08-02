@@ -257,6 +257,78 @@ async function libraryFlowCheck(browser) {
   await context.close();
 }
 
+async function indexedDbMigrationCheck(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.route('https://api.github.com/**', (route) => route.fulfill({ status: 204, body: '' }));
+  // Seed a v1 database (no memory_cards store) on the same origin before the app opens it.
+  await page.goto('http://127.0.0.1:8765/manifest.webmanifest', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('ai-learn-local', 1);
+    req.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      ['settings', 'meta', 'keys', 'zones', 'files', 'cards', 'records', 'provider_configs',
+        'zone_settings', 'levels', 'level_cards', 'review_schedule', 'daily_tasks', 'checkins'].forEach((s) => {
+        if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'id' });
+      });
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(['zones', 'files', 'cards'], 'readwrite');
+      tx.objectStore('zones').put({ id: 1, user_id: 1, name: '升级前学习区', status: '进行中', created_at: '2026-08-01 09:00:00', updated_at: '2026-08-01 09:00:00' });
+      tx.objectStore('files').put({ id: 1, zone_id: 1, filename: 'old.txt', content: '旧内容', created_at: '2026-08-01 09:00:00' });
+      tx.objectStore('cards').put({
+        id: 1,
+        file_id: 1,
+        title: '旧卡',
+        question: '旧题',
+        option_a: 'a',
+        option_b: 'b',
+        option_c: 'c',
+        option_d: 'd',
+        answer: 'A',
+        explanation: 'e',
+        label: '常考',
+        block_name: '旧',
+        difficulty: '中',
+        sort_order: 1,
+        status: '待学',
+        wrong_count: 0,
+        level_no: null,
+        created_at: '2026-08-01 09:00:00'
+      });
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  }));
+
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(async () => {
+    const zone = await LocalCoreInstance.createZone('升级后新学习区');
+    const detail = await LocalCoreInstance.getZoneDetail(zone.id);
+    if (!detail || !detail.zone) throw new Error('getZoneDetail failed after migration');
+    const memory = await LocalCoreInstance.memoryCardsByZone(zone.id);
+    if (!Array.isArray(memory)) throw new Error('memoryCardsByZone failed after migration');
+    const oldZones = await LocalCoreInstance.listZones();
+    if (!oldZones.zones.some((z) => z.name === '升级前学习区')) throw new Error('old data lost after migration');
+  });
+  const storeNames = await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('ai-learn-local');
+    req.onsuccess = () => {
+      const names = Array.from(req.result.objectStoreNames);
+      req.result.close();
+      resolve(names);
+    };
+    req.onerror = () => reject(req.error);
+  }));
+  if (!storeNames.includes('memory_cards')) throw new Error('memory_cards store missing after upgrade');
+  await context.close();
+}
+
 async function sampleImportCheck(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
@@ -283,6 +355,7 @@ async function main() {
     await mobileLayoutCheck(browser);
     await desktopLayoutCheck(browser);
     await libraryFlowCheck(browser);
+    await indexedDbMigrationCheck(browser);
     await toastAutoHideCheck(browser);
     await levelCompletionCheck(browser);
     await offlineCheck(browser);
