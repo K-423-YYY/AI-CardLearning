@@ -31,13 +31,58 @@ const Utils = {
   }
 };
 
+const Modal = {
+  show(html) {
+    const el = document.getElementById('modal');
+    const box = document.getElementById('modal-box');
+    box.innerHTML = html;
+    el.classList.remove('hidden');
+    // Backdrop click to close
+    el.onclick = (e) => { if (e.target === el) this.close(); };
+  },
+
+  close() {
+    const el = document.getElementById('modal');
+    el.classList.add('hidden');
+    el.onclick = null;
+  },
+
+  bindCancel(id) {
+    const btn = document.querySelector(id || '#modal-cancel');
+    if (btn) btn.onclick = () => this.close();
+  },
+
+  bindConfirm(id, handler) {
+    const btn = document.querySelector(id || '#modal-confirm');
+    if (btn) btn.onclick = async () => {
+      try { await handler(); } catch (e) { /* caller handles */ }
+    };
+  }
+};
+
 const Toast = {
+  _queue: [],
+  _showing: false,
+
   show(msg, type) {
+    // Deduplicate identical consecutive messages
+    if (this._queue.length && this._queue[this._queue.length - 1].msg === msg) return;
+    this._queue.push({ msg, type });
+    if (!this._showing) this._next();
+  },
+
+  _next() {
+    if (!this._queue.length) { this._showing = false; return; }
+    this._showing = true;
+    const { msg, type } = this._queue.shift();
     const el = document.getElementById('toast');
     el.textContent = msg;
     el.className = 'toast-global show ' + (type || '');
     clearTimeout(el._tid);
-    el._tid = setTimeout(() => el.classList.remove('show'), 3000);
+    el._tid = setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => this._next(), 250);
+    }, 2500);
   }
 };
 
@@ -84,8 +129,15 @@ const App = {
       case 'wrong-practice':
         Cards.renderWrongPractice(r.args[0]);
         break;
+      case 'sync':
+        SyncSettings.render();
+        break;
       case 'settings':
         r.args.length ? Settings.renderDetail(r.args[0]) : Settings.render();
+        break;
+      default:
+        console.warn('未知路由：' + r.route + '，返回首页');
+        Zones.renderHome();
         break;
     }
     this.updateDesktopShell(r);
@@ -98,9 +150,9 @@ const App = {
   },
 
   updateDesktopShell(r) {
-    const titleEl = document.getElementById('desktop-title');
-    const subEl = document.getElementById('desktop-subtitle');
-    if (!titleEl) return;
+    const breadcrumb = document.getElementById('desktop-breadcrumb');
+    const syncBadge = document.getElementById('sync-status-badge');
+    if (!breadcrumb) return; // Old shell — skip
     const titles = {
       home: ['学习总览', '管理学习区，规划每日闯关'],
       zone: ['学习区详情', '上传资料、生成卡片、查看闯关路径'],
@@ -111,24 +163,55 @@ const App = {
       learn: ['今日闯关', '新学卡片 + 到期复习'],
       wrong: ['错题集', '集中重练答错的卡片'],
       'wrong-practice': ['错题练习', '独立复习模式'],
-      settings: ['设置', '个人偏好、AI 服务商与本地备份']
+      settings: ['设置', '个人偏好、AI 服务商与本地备份'],
+      sync: ['数据同步', '通过 WebDAV 在多设备间同步学习数据']
     };
     const [title, sub] = titles[r.route] || ['AI 闯关学习', '本地优先的学习工具'];
-    titleEl.textContent = title;
-    subEl.textContent = sub;
-    document.querySelectorAll('.sidebar-item').forEach((item) => {
-      const active = (r.route === 'home' && item.dataset.nav === 'home') ||
-        (r.route === 'settings' && item.dataset.nav === 'settings');
+    breadcrumb.innerHTML = `<span class="current">${title}</span>`;
+    // Update mobile title
+    const mobileTitle = document.getElementById('mobile-title');
+    if (mobileTitle) mobileTitle.textContent = title;
+    // Update desktop topbar title
+    const dt = document.getElementById('desktop-title');
+    const ds = document.getElementById('desktop-subtitle');
+    if (dt) dt.textContent = title;
+    if (ds) ds.textContent = sub || '';
+    // Sidebar active state
+    document.querySelectorAll('#sidebar .sidebar-item').forEach((item) => {
+      const nav = item.dataset.nav;
+      const active =
+        (r.route === 'home' && nav === 'home') ||
+        (r.route === 'settings' && nav === 'settings') ||
+        (r.route === 'zone' && nav === 'zone') ||
+        (r.route === 'cards' && nav === 'library') ||
+        (r.route === 'ai' && nav === 'ai') ||
+        (r.route === 'sync' && nav === 'sync');
       item.classList.toggle('active', !!active);
     });
+    // Tabbar active state (mobile)
+    const tabMapping = { home: 'learn', zone: 'learn', learn: 'learn', cards: 'cards', settings: 'settings', sync: 'sync' };
+    const activeTab = tabMapping[r.route] || null;
+    document.querySelectorAll('#tabbar .tabbar-item').forEach((item) => {
+      item.classList.toggle('active', item.dataset.nav === activeTab);
+    });
+    // Show/hide tabbar
+    const tabbar = document.getElementById('tabbar');
+    const fab = document.getElementById('fab');
+    const showTabbar = ['learn', 'cards', 'sync', 'settings'].includes(activeTab || '');
+    if (tabbar) tabbar.classList.toggle('hidden', !showTabbar);
+    if (fab) fab.classList.toggle('hidden', r.route !== 'home');
+    // Page class for tabbar spacing
+    const app = document.getElementById('app');
+    if (app) app.classList.toggle('page-with-tabbar', showTabbar);
     this.updateVersionTags();
   },
 
   updateVersionTags() {
-    const mobile = document.getElementById('app-version');
-    const desktop = document.getElementById('desktop-version');
-    if (mobile) mobile.textContent = '版本 ' + APP_VERSION;
-    if (desktop) desktop.textContent = '版本 ' + APP_VERSION;
+    const places = ['app-version', 'desktop-version', 'sidebar-version'];
+    places.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '版本 ' + APP_VERSION;
+    });
   },
 
   async init() {
@@ -162,6 +245,8 @@ const App = {
     } else if (hash.startsWith('wrong-practice/')) {
       const zoneId = parseInt(hash.split('/')[1], 10);
       if (zoneId) target = { route: 'wrong-practice', args: [zoneId] };
+    } else if (hash === 'sync') {
+      target = { route: 'sync', args: [] };
     } else if (hash === 'settings') {
       target = { route: 'settings', args: [] };
     } else if (hash.startsWith('settings/')) {
@@ -175,6 +260,7 @@ const App = {
       const h = location.hash.replace('#', '');
       if (location.hash === this.lastHash) return;
       if (h === '' || h === 'home') this.navigate('home');
+      else if (h === 'sync') this.navigate('sync');
       else if (h === 'settings') this.navigate('settings');
       else if (h.startsWith('settings/')) this.navigate('settings', parseInt(h.split('/')[1], 10));
       else if (h.startsWith('zone/')) this.navigate('zone', parseInt(h.split('/')[1], 10));
@@ -191,11 +277,25 @@ const App = {
   },
 
   bindDesktopShell() {
-    document.querySelectorAll('.sidebar-item').forEach((item) => {
+    // Sidebar navigation (new Feishu-style)
+    document.querySelectorAll('#sidebar .sidebar-item').forEach((item) => {
       item.addEventListener('click', () => {
         const nav = item.dataset.nav;
-        if (nav === 'home') this.navigate('home');
-        if (nav === 'settings') this.navigate('settings');
+        const routeMap = {
+          home: 'home', zone: 'home', library: 'home',  // zone/library go to home with zone context
+          ai: 'home',  // AI page needs zone context
+          settings: 'settings',
+          sync: 'sync'
+        };
+        this.navigate(routeMap[nav] || 'home');
+      });
+    });
+    // Tabbar navigation (mobile)
+    document.querySelectorAll('#tabbar .tabbar-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const nav = item.dataset.nav;
+        const routeMap = { learn: 'home', cards: 'home', settings: 'settings', sync: 'sync' };
+        this.navigate(routeMap[nav] || 'home');
       });
     });
     const backupBtn = document.getElementById('desktop-backup');
@@ -205,6 +305,24 @@ const App = {
     const settingsBtn = document.getElementById('desktop-settings');
     if (settingsBtn) {
       settingsBtn.addEventListener('click', () => this.navigate('settings'));
+    }
+    // FAB click
+    const fab = document.getElementById('fab');
+    if (fab) {
+      fab.addEventListener('click', () => {
+        if (this.currentRoute && this.currentRoute.route === 'home') {
+          Zones.showCreateModal();
+        }
+      });
+    }
+    // Mobile back button
+    const mobileBack = document.getElementById('btn-mobile-back');
+    if (mobileBack) {
+      mobileBack.addEventListener('click', () => {
+        if (this.currentRoute && this.currentRoute.route !== 'home') {
+          this.navigate('home');
+        }
+      });
     }
   },
 
@@ -243,9 +361,7 @@ const App = {
   },
 
   showUpdateModal(data) {
-    const modal = document.getElementById('modal');
-    const box = document.getElementById('modal-box');
-    box.innerHTML = `
+    Modal.show(`
       <h3>发现新版本</h3>
       <p style="font-size:0.9rem;color:#334155;margin-bottom:10px;">
         最新版本：<b>${Utils.esc(data.tag_name || '')}</b>
@@ -257,10 +373,8 @@ const App = {
         <button class="btn btn-outline btn-sm" id="modal-cancel">稍后再说</button>
         <a class="btn btn-primary btn-sm" id="modal-download" href="${Utils.esc(data.html_url || 'https://github.com/K-423-YYY/AI-CardLearning/releases')}" target="_blank" rel="noopener">前往下载</a>
       </div>
-    `;
-    modal.classList.remove('hidden');
-    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
-    modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
+    `);
+    Modal.bindCancel();
   }
 };
 

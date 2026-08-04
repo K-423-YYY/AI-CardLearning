@@ -28,6 +28,10 @@
     return rows.filter(predicate);
   }
 
+  async function byIndex(storeName, indexName, value) {
+    return storage.byIndex(storeName, indexName, value);
+  }
+
   return {
     all: storage.all,
     get: storage.get,
@@ -36,6 +40,7 @@
     clear: storage.clear,
     count: storage.count,
     where,
+    byIndex,
     nextId,
     insert
   };

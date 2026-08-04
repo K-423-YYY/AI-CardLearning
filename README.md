@@ -18,6 +18,11 @@
 - 资料格式：支持文本、Markdown、代码、PDF、Word(.docx) 和图片；上传大小不受应用限制
 - 备份目录：电脑和手机可分别设置导出文件夹，导入时优先打开该目录
 - 科学学习机制：新学关同时安排正确卡片间隔复习与错题强化复习，采用主动回忆、交错练习和间隔重复
+- 全新 UI：桌面端深色侧边栏（6 项导航）+ 手机端底部标签栏（4 标签），统一配色与卡片设计
+- 云盘同步：支持 WebDAV 协议（坚果云/NextCloud/群晖 NAS），数据可跨设备同步，支持手动上传/下载/双向同步 + 自动定时同步
+- AI 对话式分析：四阶段精炼每阶段拥有独立对话界面，支持微调输入和迭代重新生成，实时显示阶段进度
+- 键盘无障碍：答题支持数字键 1-4 / A-D 选择，Enter 翻题；记忆卡支持 Space 翻面、1/2 判别
+- 性能优化：IndexedDB 索引加速、TTL 内存缓存、读写锁分离、Toast 消息队列
 - 闯关路径：新学关与复习关组成的可视化学习路径
 - 导入导出：`.zip` 备份可存网盘、云盘或直接发给他人，API Key 不会进入备份文件
 - 自动更新：应用启动时自动检查 GitHub 最新版本，发现新版本会提示下载，覆盖安装后数据自动保留
@@ -83,12 +88,22 @@ app/                        # 本地版主应用（PWA）
   index.html
   manifest.webmanifest
   sw.js
-  css/style.css
+  css/
+    variables.css           # 设计系统变量（颜色、间距、圆角、阴影）
+    reset.css               # 基础归一化样式
+    layout.css              # 桌面/手机布局框架（侧边栏、顶栏、标签栏）
+    components.css          # 可复用组件（按钮、卡片、表单、Toast、模态框）
+    pages.css               # 页面级样式（首页、答题、AI 对话、设置）
+    mobile.css              # 手机端响应式样式
+    style.css               # 旧版样式（兼容保留）
   js/
-    local/                  # 本地数据层、核心业务、AI、PDF、导入导出
-    library.js              # 闯关卡库 / 记忆卡库 / 收藏库
+    local/                  # 本地数据层（storage、db、core、ai、cache、pdf、docx）
+    components/             # 🆕 可复用组件（chat-dialog、tabs、empty-state）
+    pages/                  # 🆕 页面模块（ai-analyze、sync-settings）
+    sync.js                 # 🆕 WebDAV 云盘同步模块
     api.js                  # 本地 API 路由
-    zones.js / cards.js / settings.js / app.js
+    app.js                  # 路由与布局管理
+    zones.js / cards.js / library.js / settings.js / auth.js
   vendor/                   # 本地内置 pdf.js 与 JSZip
 desktop/                    # Electron 桌面壳
 android/                    # Capacitor Android 配置

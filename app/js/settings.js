@@ -293,15 +293,13 @@ const Settings = {
     empty.classList.add('hidden');
     el.innerHTML = list.map((p) => `
       <div class="provider-card ${p.active ? 'active' : ''}">
-        <div class="provider-head">
-          <span class="provider-name">${Utils.esc(p.name)}</span>
-          <span class="provider-badge ${p.active ? 'badge-active' : 'badge-inactive'}">${p.active ? '已启动' : '未启动'}</span>
-        </div>
-        <div class="provider-meta">${Utils.esc(p.base_url)} · 模型 ${p.model_count || 0} 个</div>
+        <div class="provider-name">${Utils.esc(p.name)}</div>
+        <span class="badge ${p.active ? 'badge-success' : ''}" style="font-size:11px;margin-left:0">${p.active ? '已启动' : '未启动'}</span>
+        <div class="provider-url">${Utils.esc(p.base_url)} · 模型 ${p.model_count || 0} 个</div>
         <div class="provider-actions">
           <button class="btn btn-outline btn-sm" data-act="config" data-id="${p.id}">配置</button>
           <button class="btn btn-outline btn-sm" data-act="activate" data-id="${p.id}" ${p.active ? 'disabled' : ''}>启动</button>
-          <button class="btn btn-danger btn-sm" data-act="delete" data-id="${p.id}">删除</button>
+          <button class="btn btn-outline btn-sm" data-act="delete" data-id="${p.id}" style="color:var(--color-danger)">删除</button>
         </div>
       </div>
     `).join('');

@@ -196,25 +196,58 @@ const Cards = {
     const optionsEl = document.getElementById('quiz-options');
     const resultEl = document.getElementById('quiz-result');
     const nextBtn = document.getElementById('btn-next');
+    const optionEls = optionsEl.querySelectorAll('.quiz-option');
+
+    // Keyboard shortcut map: 1→A, 2→B, 3→C, 4→D, also A→A, B→B, etc.
+    const keyHandler = (e) => {
+      if (this.lock) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          nextBtn.click();
+        }
+        return;
+      }
+      const key = e.key.toUpperCase();
+      const keyMap = { '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D' };
+      const letter = keyMap[key];
+      if (letter) {
+        e.preventDefault();
+        const target = optionsEl.querySelector(`.quiz-option[data-letter="${letter}"]`);
+        if (target) target.click();
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+    this._keyHandler = keyHandler;
 
     // Click option
-    optionsEl.querySelectorAll('.quiz-option').forEach(opt => {
+    optionEls.forEach((opt, i) => {
+      opt.setAttribute('role', 'button');
+      opt.setAttribute('tabindex', '0');
+      opt.setAttribute('aria-label', `选项 ${['A','B','C','D'][i]}：${card.options[['A','B','C','D'][i]] || ''}`);
       opt.addEventListener('click', () => {
         if (this.lock) return;
         this.lock = true;
         const letter = opt.dataset.letter;
-        // Mark all with disabled
         optionsEl.querySelectorAll('.quiz-option').forEach(o => o.classList.add('disabled'));
         opt.classList.add('selected');
-
+        document.removeEventListener('keydown', keyHandler);
         this.submitAnswer(card.card_id, letter, opt, optionsEl, resultEl, nextBtn);
+      });
+      // Keyboard: Enter/Space on focused option
+      opt.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          opt.click();
+        }
       });
     });
 
     nextBtn.addEventListener('click', () => {
+      document.removeEventListener('keydown', this._keyHandler);
       this.renderCard(index + 1);
       this.renderProgress();
     });
+    nextBtn.setAttribute('aria-label', '下一题');
   },
 
   async submitAnswer(cardId, letter, optEl, optionsEl, resultEl, nextBtn) {
@@ -347,16 +380,52 @@ const Cards = {
 
     const resultEl = quizEl.querySelector('#quiz-result');
     const nextBtn = quizEl.querySelector('#btn-next');
-    document.getElementById('btn-memory-reveal').onclick = () => {
+    const revealBtn = document.getElementById('btn-memory-reveal');
+    revealBtn.onclick = () => {
       document.getElementById('memory-back').classList.remove('hidden');
     };
+    revealBtn.setAttribute('aria-label', '显示答案');
+
+    // Keyboard: Space/Enter to reveal, then 1=认识, 2=不认识
+    const keyHandler = (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        const back = document.getElementById('memory-back');
+        if (back && back.classList.contains('hidden')) {
+          revealBtn.click();
+        } else if (this.lock && nextBtn.classList.contains('show')) {
+          nextBtn.click();
+        }
+      }
+      if (!this.lock) {
+        if (e.key === '1') {
+          e.preventDefault();
+          const btn = quizEl.querySelector('[data-known="1"]');
+          if (btn && !document.getElementById('memory-back').classList.contains('hidden')) btn.click();
+        }
+        if (e.key === '2') {
+          e.preventDefault();
+          const btn = quizEl.querySelector('[data-known="0"]');
+          if (btn && !document.getElementById('memory-back').classList.contains('hidden')) btn.click();
+        }
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+    this._keyHandler = keyHandler;
+
     quizEl.querySelectorAll('[data-known]').forEach((btn) => {
-      btn.addEventListener('click', () => this.submitMemory(card, btn.dataset.known === '1', quizEl, resultEl, nextBtn));
+      btn.setAttribute('aria-label', btn.dataset.known === '1' ? '认识' : '不认识');
+      btn.addEventListener('click', () => {
+        document.removeEventListener('keydown', keyHandler);
+        this.submitMemory(card, btn.dataset.known === '1', quizEl, resultEl, nextBtn);
+      });
     });
     nextBtn.addEventListener('click', () => {
+      document.removeEventListener('keydown', this._keyHandler);
       this.renderMemoryCard(index + 1);
       this.renderProgress();
     });
+    nextBtn.setAttribute('aria-label', '下一张');
   },
 
   async submitMemory(card, known, quizEl, resultEl, nextBtn) {

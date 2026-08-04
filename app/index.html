@@ -9,141 +9,103 @@
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
 <link rel="stylesheet" href="./css/style.css?v=33">
+<link rel="stylesheet" href="./css/variables.css?v=35">
+<link rel="stylesheet" href="./css/reset.css?v=35">
+<link rel="stylesheet" href="./css/layout.css?v=35">
+<link rel="stylesheet" href="./css/components.css?v=35">
+<link rel="stylesheet" href="./css/pages.css?v=35">
+<link rel="stylesheet" href="./css/mobile.css?v=35">
 </head>
 <body>
-<aside id="sidebar" class="desktop-only">
-  <div class="sidebar-brand">
-    <div class="brand-mark">AI</div>
+<!-- Desktop Sidebar -->
+<nav id="sidebar" class="sidebar" role="navigation" aria-label="主导航">
+  <div class="sidebar-header">
+    <div class="sidebar-brand-icon">AI</div>
     <div>
-      <div class="brand-name">AI 闯关学习</div>
-      <div class="brand-sub">本地开源版</div>
+      <div class="sidebar-brand-name">AI 闯关学习</div>
+      <div class="sidebar-brand-sub">本地开源版</div>
     </div>
   </div>
-  <nav class="sidebar-nav">
+  <div class="sidebar-nav">
     <button class="sidebar-item active" data-nav="home">
       <span class="sidebar-icon">⌂</span> 学习总览
     </button>
-    <button class="sidebar-item" data-nav="settings">
-      <span class="sidebar-icon">⚙</span> 设置与备份
+    <button class="sidebar-item" data-nav="zone">
+      <span class="sidebar-icon">📚</span> 学习区
     </button>
-  </nav>
-  <div class="sidebar-foot">
-    <span class="local-badge">● 本地模式</span>
-    <p>数据仅保存在这台设备</p>
-    <span class="version-tag" id="desktop-version"></span>
+    <button class="sidebar-item" data-nav="library">
+      <span class="sidebar-icon">🃏</span> 卡片库
+    </button>
+    <button class="sidebar-item" data-nav="ai">
+      <span class="sidebar-icon">✦</span> AI 分析
+    </button>
+    <button class="sidebar-item" data-nav="sync">
+      <span class="sidebar-icon">☁</span> 数据同步
+    </button>
+    <button class="sidebar-item" data-nav="settings">
+      <span class="sidebar-icon">⚙</span> 设置
+    </button>
   </div>
-</aside>
-<div id="desktop-main">
-  <header id="desktop-topbar" class="desktop-only">
-    <div>
-      <h1 id="desktop-title">学习总览</h1>
-      <p id="desktop-subtitle">管理学习区，规划每日闯关</p>
+  <div class="sidebar-footer">
+    <div class="sidebar-sync-status">
+      <span class="sidebar-sync-dot offline" id="sidebar-sync-dot"></span>
+      <span id="sidebar-sync-text">本地模式</span>
     </div>
-    <div class="desktop-topbar-right">
-      <span class="local-badge desktop-badge">● 本地模式</span>
+    <div class="sidebar-user">
+      <div class="sidebar-avatar" id="sidebar-avatar">L</div>
+      <span class="sidebar-user-name" id="sidebar-user-name">本地用户</span>
+    </div>
+    <span class="sidebar-version" id="sidebar-version">版本 0.3.0</span>
+  </div>
+</nav>
+
+<div id="main-wrapper">
+  <!-- Desktop Topbar -->
+  <header id="desktop-topbar" class="topbar-desktop">
+    <div class="breadcrumb" id="desktop-breadcrumb"></div>
+    <div class="topbar-actions">
+      <span class="badge badge-primary" id="sync-status-badge">● 本地模式</span>
       <button class="btn btn-outline btn-sm" id="desktop-backup">导出备份</button>
-      <button class="btn-icon" id="desktop-settings" title="设置">⚙️</button>
+      <button class="btn-icon" id="desktop-settings" title="设置" aria-label="设置">⚙</button>
     </div>
   </header>
+
+  <!-- Mobile Topbar -->
+  <header id="mobile-topbar" class="topbar-mobile">
+    <button class="btn-back" id="btn-mobile-back" aria-label="返回">←</button>
+    <h1 id="mobile-title">AI 闯关学习</h1>
+    <div class="topbar-actions" id="mobile-topbar-actions"></div>
+  </header>
+
   <div id="app"></div>
+
+  <!-- Mobile Tab Bar -->
+  <nav id="tabbar" class="tabbar" role="navigation" aria-label="底部导航">
+    <button class="tabbar-item active" data-nav="learn" aria-label="学习">
+      <span class="tabbar-icon">⌂</span>
+      <span class="tabbar-label">学习</span>
+    </button>
+    <button class="tabbar-item" data-nav="cards" aria-label="卡片库">
+      <span class="tabbar-icon">🃏</span>
+      <span class="tabbar-label">卡片库</span>
+    </button>
+    <button class="tabbar-item" data-nav="sync" aria-label="同步">
+      <span class="tabbar-icon">☁</span>
+      <span class="tabbar-label">同步</span>
+    </button>
+    <button class="tabbar-item" data-nav="settings" aria-label="设置">
+      <span class="tabbar-icon">⚙</span>
+      <span class="tabbar-label">设置</span>
+    </button>
+  </nav>
 </div>
 
+<!-- Floating Action Button -->
+<button id="fab" class="fab hidden" title="新建学习区" aria-label="新建学习区">+</button>
+
+<!-- Legacy sidebar (hidden, kept for backward compat during transition) -->
+
 <!-- Templates -->
-<template id="tpl-login">
-  <div class="page page-center">
-    <div class="login-card">
-      <div class="logo-area">
-        <div class="logo-icon">🧠</div>
-        <h1>AI 闯关学习</h1>
-        <p>上传资料 · 生成卡片 · 每日闯关</p>
-      </div>
-      <div class="login-tabs">
-        <button type="button" class="tab-btn active" id="tab-pwd">密码登录</button>
-        <button type="button" class="tab-btn" id="tab-code">验证码登录</button>
-      </div>
-
-      <form id="login-pwd-form" class="login-form">
-        <div class="input-group">
-          <label>邮箱</label>
-          <input type="email" id="login-email" maxlength="254" placeholder="请输入邮箱" autocomplete="email">
-        </div>
-        <div class="input-group">
-          <label>密码</label>
-          <input type="password" id="login-password" maxlength="128" placeholder="请输入密码" autocomplete="current-password">
-        </div>
-        <button type="submit" class="btn btn-primary btn-block" id="btn-login">登录</button>
-        <div class="login-links">
-          <a href="#" id="link-register">注册账号</a>
-          <a href="#" id="link-reset">忘记密码</a>
-        </div>
-      </form>
-
-      <form id="login-code-form" class="login-form hidden">
-        <div class="input-group">
-          <label>邮箱</label>
-          <input type="email" id="login-code-email" maxlength="254" placeholder="请输入邮箱" autocomplete="email">
-        </div>
-        <div class="input-row">
-          <div class="input-group flex-1">
-            <label>验证码</label>
-            <input type="text" id="login-code-value" maxlength="6" placeholder="6位验证码" autocomplete="one-time-code">
-          </div>
-          <button type="button" id="btn-send-login-code" class="btn btn-outline btn-code" disabled>发送验证码</button>
-        </div>
-        <div id="dev-code-hint-login" class="dev-code-hint hidden"></div>
-        <button type="submit" class="btn btn-primary btn-block" id="btn-login-code">登录 / 注册</button>
-        <div class="login-links"><a href="#" id="link-back-login-code">返回密码登录</a></div>
-      </form>
-
-      <form id="register-form" class="login-form hidden">
-        <div class="login-mode-title">注册账号</div>
-        <div class="input-group">
-          <label>邮箱</label>
-          <input type="email" id="reg-email" maxlength="254" placeholder="请输入邮箱" autocomplete="email">
-        </div>
-        <div class="input-row">
-          <div class="input-group flex-1">
-            <label>邮箱验证码</label>
-            <input type="text" id="reg-code" maxlength="6" placeholder="6位验证码" autocomplete="one-time-code">
-          </div>
-          <button type="button" id="btn-send-reg-code" class="btn btn-outline btn-code" disabled>发送验证码</button>
-        </div>
-        <div id="dev-code-hint-reg" class="dev-code-hint hidden"></div>
-        <div class="input-group">
-          <label>设置密码</label>
-          <input type="password" id="reg-password" maxlength="128" minlength="6" placeholder="至少6位" autocomplete="new-password">
-        </div>
-        <button type="submit" class="btn btn-primary btn-block" id="btn-register">注册</button>
-        <div class="login-links"><a href="#" id="link-back-login-reg">返回登录</a></div>
-      </form>
-
-      <form id="reset-form" class="login-form hidden">
-        <div class="login-mode-title">重置密码</div>
-        <div class="input-group">
-          <label>邮箱</label>
-          <input type="email" id="reset-email" maxlength="254" placeholder="请输入注册邮箱" autocomplete="email">
-        </div>
-        <div class="input-row">
-          <div class="input-group flex-1">
-            <label>邮箱验证码</label>
-            <input type="text" id="reset-code" maxlength="6" placeholder="6位验证码" autocomplete="one-time-code">
-          </div>
-          <button type="button" id="btn-send-reset-code" class="btn btn-outline btn-code" disabled>发送验证码</button>
-        </div>
-        <div id="dev-code-hint-reset" class="dev-code-hint hidden"></div>
-        <div class="input-group">
-          <label>新密码</label>
-          <input type="password" id="reset-password" maxlength="128" minlength="6" placeholder="至少6位" autocomplete="new-password">
-        </div>
-        <button type="submit" class="btn btn-primary btn-block" id="btn-reset">重置密码</button>
-        <div class="login-links"><a href="#" id="link-back-login-reset">返回登录</a></div>
-      </form>
-
-      <p class="login-hint">注册后可用邮箱和密码登录，也可用验证码快捷登录</p>
-    </div>
-  </div>
-</template>
-
 <template id="tpl-loading">
   <div class="page page-center">
     <div class="spinner"></div>
@@ -390,151 +352,101 @@
 
 <template id="tpl-settings">
   <div class="page">
-    <header class="topbar">
-      <button class="btn-icon btn-back" id="btn-back-home-set">←</button>
-      <div class="topbar-title">设置</div>
-      <div style="width:40px"></div>
-    </header>
-    <main class="main-content">
-      <div class="settings-section">
-        <h3>个人设置</h3>
+    <main class="settings-grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">个人设置</span></div>
         <div class="form-group">
-          <label>昵称</label>
-          <input type="text" id="set-nickname" maxlength="20" placeholder="给自己起个名字">
+          <label class="form-label">昵称</label>
+          <input class="form-input" type="text" id="set-nickname" maxlength="20" placeholder="给自己起个名字">
         </div>
         <div class="form-group">
-          <label>每日学习卡片数</label>
-          <input type="number" id="set-daily-limit" min="1" max="100" value="5">
+          <label class="form-label">每日学习卡片数</label>
+          <input class="form-input" type="number" id="set-daily-limit" min="1" max="100" value="5">
           <span class="form-hint">每天新学的卡片数量，默认5张</span>
         </div>
-        <button class="btn btn-primary btn-block" id="btn-save-profile">保存个人设置</button>
+        <button class="btn btn-primary" id="btn-save-profile">保存个人设置</button>
       </div>
 
-      <div class="settings-section">
-        <h3>本地备份</h3>
+      <div class="card">
+        <div class="card-header"><span class="card-title">本地备份</span></div>
         <p class="form-hint" id="backup-info">数据只保存在本机，导出压缩包后可存网盘或发给他人。</p>
-        <div class="backup-actions">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
           <button class="btn btn-primary btn-block" id="btn-export-backup">导出完整备份（压缩包）</button>
           <button class="btn btn-outline btn-block" id="btn-import-backup">导入备份文件</button>
           <input type="file" id="import-file-input" accept=".zip" class="hidden">
         </div>
       </div>
 
-      <div class="settings-section">
-        <h3>备份目录</h3>
-        <p class="form-hint">设置后导出会优先保存到这里，导入也会优先打开该目录；未设置时使用系统默认位置。</p>
-        <div id="backup-dir-path" class="backup-dir-path">尚未设置，使用系统默认位置</div>
-        <div class="backup-actions">
-          <button class="btn btn-outline btn-block" id="btn-choose-backup-dir">选择备份目录</button>
-          <button class="btn btn-outline btn-block hidden" id="btn-open-backup-dir">打开备份目录</button>
+      <div class="card">
+        <div class="card-header"><span class="card-title">备份目录</span></div>
+        <p class="form-hint">设置后导出会优先保存到这里，导入也会优先打开该目录。</p>
+        <div id="backup-dir-path" style="padding:10px;background:var(--color-bg-page);border-radius:6px;font-size:13px;margin:8px 0">尚未设置</div>
+        <button class="btn btn-outline btn-block" id="btn-choose-backup-dir">选择备份目录</button>
+        <button class="btn btn-outline btn-block hidden" id="btn-open-backup-dir">打开备份目录</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">AI 加速档位</span></div>
+        <p class="form-hint">文件达到对应大小后自动切换更高倍速</p>
+        <div class="form-group"><label class="form-label">5倍档</label><div class="speed-tier-row"><input class="form-input" type="number" id="speed-tier2-mb" min="0.1" step="0.1" value="1" style="flex:1"><select class="form-select" id="speed-tier2-unit" style="width:84px"><option value="kb">KB</option><option value="mb" selected>MB</option></select></div></div>
+        <div class="form-group"><label class="form-label">10倍档</label><div class="speed-tier-row"><input class="form-input" type="number" id="speed-tier3-mb" min="0.2" step="0.1" value="5" style="flex:1"><select class="form-select" id="speed-tier3-unit" style="width:84px"><option value="kb">KB</option><option value="mb" selected>MB</option></select></div></div>
+        <div class="form-group"><label class="form-label">20倍档</label><div class="speed-tier-row"><input class="form-input" type="number" id="speed-tier4-mb" min="0.3" step="0.1" value="20" style="flex:1"><select class="form-select" id="speed-tier4-unit" style="width:84px"><option value="kb">KB</option><option value="mb" selected>MB</option></select></div></div>
+        <button class="btn btn-outline" id="btn-save-speed-tiers">保存加速档位</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">AI 服务商</span>
+          <button class="btn btn-primary btn-sm" id="btn-add-provider">+ 添加</button>
+        </div>
+        <div id="provider-list" class="provider-list"></div>
+        <div id="provider-empty" class="empty-state hidden">
+          <div class="empty-icon">🔌</div>
+          <p>还没有服务商</p>
+          <p class="empty-hint">添加服务商后进入配置页填写接口密钥</p>
         </div>
       </div>
 
-      <div class="settings-section">
-        <h3>AI 加速档位</h3>
-        <p class="form-hint">文件达到对应大小后自动切换更高倍速；实际速度还会受 AI 服务商限流影响。</p>
-        <div class="form-group">
-          <label>5倍档起始大小</label>
-          <div class="speed-tier-row">
-            <input type="number" id="speed-tier2-mb" min="0.1" step="0.1" value="1">
-            <select id="speed-tier2-unit"><option value="kb">KB</option><option value="mb" selected>MB</option></select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>10倍档起始大小</label>
-          <div class="speed-tier-row">
-            <input type="number" id="speed-tier3-mb" min="0.2" step="0.1" value="5">
-            <select id="speed-tier3-unit"><option value="kb">KB</option><option value="mb" selected>MB</option></select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>20倍档起始大小</label>
-          <div class="speed-tier-row">
-            <input type="number" id="speed-tier4-mb" min="0.3" step="0.1" value="20">
-            <select id="speed-tier4-unit"><option value="kb">KB</option><option value="mb" selected>MB</option></select>
-          </div>
-        </div>
-        <button class="btn btn-outline btn-block" id="btn-save-speed-tiers">保存加速档位</button>
-      </div>
-      
-      <div class="section-header">
-        <h3>AI 服务商</h3>
-        <button class="btn btn-primary btn-sm" id="btn-add-provider">+ 添加</button>
-      </div>
-      <div id="provider-list" class="provider-list"></div>
-      <div id="provider-empty" class="empty-state hidden">
-        <div class="empty-icon">🔌</div>
-        <p>还没有服务商</p>
-        <p class="empty-hint">添加服务商后进入配置页填写接口密钥</p>
-      </div>
       <div id="settings-msg" class="toast hidden"></div>
       <div class="app-version" id="app-version"></div>
     </main>
   </div>
 </template>
 
-<template id="tpl-provider-detail">
-  <div class="page">
-    <header class="topbar">
-      <button class="btn-icon btn-back" id="btn-back-providers">←</button>
-      <div class="topbar-title" id="provider-detail-title">服务商配置</div>
-      <span class="provider-active-badge" id="provider-active-badge">未启动</span>
-    </header>
-    <main class="main-content">
-      <div class="settings-section">
-        <h3>服务商设置</h3>
-        <div class="form-group">
-          <label>服务商名称</label>
-          <input type="text" id="p-name" maxlength="30" placeholder="例如：我的 DeepSeek">
+<template id=”tpl-provider-detail”>
+  <div class=”page”>
+    <main class=”settings-grid”>
+      <div class=”card”>
+        <div class=”card-header”>
+          <span class=”card-title” id=”provider-detail-title”>服务商配置</span>
+          <span class=”badge” id=”provider-active-badge”>未启动</span>
         </div>
-        <div class="form-group">
-          <label>接口地址</label>
-          <input type="url" id="p-base-url" placeholder="https://api.deepseek.com">
-          <span class="form-hint">选择服务商模板可自动填入，也可手动修改</span>
-        </div>
-        <div class="form-group">
-          <label>接口密钥</label>
-          <div class="key-row">
-            <input type="password" id="p-api-key" placeholder="输入你的 API Key" autocomplete="off">
-            <button class="btn btn-outline btn-sm" id="btn-toggle-key">显示</button>
-          </div>
-          <span class="form-hint" id="p-key-hint"></span>
-        </div>
-        <div class="form-group">
-          <label>服务商模板</label>
-          <select id="p-preset"></select>
-        </div>
+        <div class=”form-group”><label class=”form-label”>服务商名称</label><input class=”form-input” type=”text” id=”p-name” maxlength=”30” placeholder=”例如：我的 DeepSeek”></div>
+        <div class=”form-group”><label class=”form-label”>接口地址</label><input class=”form-input” type=”url” id=”p-base-url” placeholder=”https://api.deepseek.com”><span class=”form-hint”>选择服务商模板可自动填入</span></div>
+        <div class=”form-group”><label class=”form-label”>接口密钥</label><div style=”display:flex;gap:8px”><input class=”form-input” type=”password” id=”p-api-key” placeholder=”输入你的 API Key” autocomplete=”off” style=”flex:1”><button class=”btn btn-outline btn-sm” id=”btn-toggle-key”>显示</button></div><span class=”form-hint” id=”p-key-hint”></span></div>
+        <div class=”form-group”><label class=”form-label”>服务商模板</label><select class=”form-select” id=”p-preset”></select></div>
       </div>
 
-      <div class="settings-section">
-        <div class="section-header">
-          <h3>模型</h3>
-          <button class="btn btn-outline btn-sm" id="btn-fetch-models">获取模型</button>
-        </div>
-        <div id="fetch-result" class="ai-test-result hidden"></div>
-        <div class="model-toolbar">
-          <input type="number" id="add-model-count" min="1" max="20" value="1">
-          <button class="btn btn-outline btn-sm" id="btn-add-model">+ 添加模型</button>
-        </div>
-        <div id="model-rows" class="model-rows"></div>
-        <p id="model-empty" class="form-hint">还没有模型，请先点击“获取模型”，再点“添加模型”选择官方模型。</p>
+      <div class=”card”>
+        <div class=”card-header”><span class=”card-title”>模型</span><button class=”btn btn-outline btn-sm” id=”btn-fetch-models”>获取模型</button></div>
+        <div id=”fetch-result” class=”ai-test-result hidden”></div>
+        <div style=”display:flex;gap:8px;margin-bottom:8px”><input class=”form-input” type=”number” id=”add-model-count” min=”1” max=”20” value=”1” style=”width:70px”><button class=”btn btn-outline btn-sm” id=”btn-add-model”>+ 添加模型</button></div>
+        <div id=”model-rows” class=”model-rows”></div>
+        <p id=”model-empty” class=”form-hint”>还没有模型，请先点击”获取模型”，再点”添加模型”。</p>
       </div>
 
-      <div class="settings-section hidden" id="custom-template-section">
-        <h3>自定义完整模板</h3>
-        <p class="form-hint">支持粘贴各类接口配置软件导出的 JSON 配置，字段：名称、接口地址、密钥、模型列表</p>
-        <textarea id="template-json" rows="7" placeholder='{"name":"我的服务商","base_url":"https://api.example.com/v1","api_key":"sk-...","models":["model-1","model-2"]}'></textarea>
-        <div class="template-actions">
-          <button class="btn btn-outline btn-sm" id="btn-template-sample">填入示例</button>
-          <button class="btn btn-primary btn-sm" id="btn-template-apply">应用模板</button>
-        </div>
+      <div class=”card hidden” id=”custom-template-section”>
+        <div class=”card-header”><span class=”card-title”>自定义完整模板</span></div>
+        <p class=”form-hint”>支持粘贴各类接口配置软件导出的 JSON 配置</p>
+        <textarea class=”form-textarea” id=”template-json” rows=”6” placeholder='{“name”:”我的服务商”,”base_url”:”https://api.example.com/v1”,”api_key”:”sk-...”,”models”:[“model-1”,”model-2”]}'></textarea>
+        <div style=”display:flex;gap:8px;margin-top:8px”><button class=”btn btn-outline btn-sm” id=”btn-template-sample” style=”flex:1”>填入示例</button><button class=”btn btn-primary btn-sm” id=”btn-template-apply” style=”flex:1”>应用模板</button></div>
       </div>
 
-      <button class="btn btn-primary btn-block" id="btn-save-provider">保存配置</button>
-      <button class="btn btn-success btn-block" id="btn-activate-provider">启动此服务商</button>
-      <button class="btn btn-outline btn-block" id="btn-test-provider">测试连接</button>
-      <div id="provider-test-result" class="ai-test-result hidden"></div>
-      <button class="btn btn-danger btn-block" id="btn-delete-provider">删除服务商</button>
+      <button class=”btn btn-primary btn-block” id=”btn-save-provider”>保存配置</button>
+      <button class=”btn btn-success btn-block” id=”btn-activate-provider”>启动此服务商</button>
+      <button class=”btn btn-outline btn-block” id=”btn-test-provider”>测试连接</button>
+      <div id=”provider-test-result” class=”ai-test-result hidden”></div>
+      <button class=”btn btn-outline btn-block” id=”btn-delete-provider” style=”color:var(--color-danger)”>删除服务商</button>
     </main>
   </div>
 </template>
@@ -560,18 +472,23 @@
 </script>
 <script src="./js/local/storage.js?v=33"></script>
 <script src="./js/local/db.js?v=33"></script>
-<script src="./js/local/core.js?v=33"></script>
-<script src="./js/local/ai.js?v=33"></script>
+<script src="./js/local/cache.js?v=34"></script>
+<script src="./js/local/core.js?v=34"></script>
+<script src="./js/local/ai.js?v=34"></script>
 <script src="./js/local/pdf.js?v=33"></script>
 <script src="./js/local/export.js?v=33"></script>
 <script src="./js/local/import.js?v=33"></script>
-<script src="./js/api.js?v=33"></script>
+<script src="./js/api.js?v=34"></script>
+<script src="./js/components/chat-dialog.js?v=35"></script>
+<script src="./js/pages/ai-analyze.js?v=35"></script>
+<script src="./js/pages/sync-settings.js?v=35"></script>
+<script src="./js/sync.js?v=35"></script>
 <script src="./js/auth.js?v=33"></script>
-<script src="./js/zones.js?v=33"></script>
+<script src="./js/zones.js?v=34"></script>
 <script src="./js/cards.js?v=33"></script>
 <script src="./js/library.js?v=33"></script>
 <script src="./js/settings.js?v=33"></script>
-<script src="./js/app.js?v=33"></script>
+<script src="./js/app.js?v=34"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

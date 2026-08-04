@@ -1,8 +1,14 @@
-const CACHE_NAME = 'ai-learn-local-v17';
+const CACHE_NAME = 'ai-learn-local-v18';
 const PRECACHE = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './css/variables.css?v=35',
+  './css/reset.css?v=35',
+  './css/layout.css?v=35',
+  './css/components.css?v=35',
+  './css/pages.css?v=35',
+  './css/mobile.css?v=35',
   './css/style.css?v=33',
   './vendor/jszip.min.js',
   './js/local/docx.js?v=33',
@@ -10,18 +16,23 @@ const PRECACHE = [
   './vendor/pdf.worker.mjs',
   './js/local/storage.js?v=33',
   './js/local/db.js?v=33',
-  './js/local/core.js?v=33',
-  './js/local/ai.js?v=33',
+  './js/local/cache.js?v=34',
+  './js/local/core.js?v=34',
+  './js/local/ai.js?v=34',
   './js/local/pdf.js?v=33',
   './js/local/export.js?v=33',
   './js/local/import.js?v=33',
-  './js/api.js?v=33',
+  './js/api.js?v=34',
+  './js/components/chat-dialog.js?v=35',
+  './js/pages/ai-analyze.js?v=35',
+  './js/pages/sync-settings.js?v=35',
+  './js/sync.js?v=35',
   './js/auth.js?v=33',
-  './js/zones.js?v=33',
+  './js/zones.js?v=34',
   './js/cards.js?v=33',
   './js/library.js?v=33',
   './js/settings.js?v=33',
-  './js/app.js?v=33',
+  './js/app.js?v=34',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png'
@@ -30,7 +41,9 @@ const PRECACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE))
+      .then((cache) =>
+        Promise.allSettled(PRECACHE.map((url) => cache.add(url).catch(() => {})))
+      )
       .then(() => self.skipWaiting())
   );
 });

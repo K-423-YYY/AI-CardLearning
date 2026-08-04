@@ -604,9 +604,16 @@
       const profile = resolveSpeedProfile(await core.getSettings(), totalBytes);
       const currentProfile = () => (profileRef && profileRef.value) || profile;
       let generated = 0;
+      let skipped = 0;
       const failed = [];
       let done = 0;
       const indexed = normalized.map((point, index) => ({ point, sortOrder: index + 1 }));
+
+      function countResult(result) {
+        if (result === true) return 'generated';
+        if (result && result.skipped) return 'skipped';
+        return 'generated'; // legacy fallback
+      }
       let nextIndex = 0;
       const takeBatch = () => {
         if (nextIndex >= indexed.length) return null;
@@ -617,7 +624,9 @@
       };
       const generateOne = async (item) => {
         if (item.point.exam_options && item.point.exam_options.length >= 2) {
-          return core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder);
+          const result = await core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder);
+          if (result && result.skipped) { skipped++; return 0; }
+          return result ? 1 : 0;
         }
         const messages = [
           { role: 'system', content: CARD_SYSTEM },
@@ -628,14 +637,18 @@
         ];
         const data = await chatJson(config.api_key, config.base_url, config.model, messages, 150000);
         const card = parseCard(data);
-        return core.generateCard(zoneId, item.point, card, item.sortOrder);
+        const result = await core.generateCard(zoneId, item.point, card, item.sortOrder);
+        if (result && result.skipped) { skipped++; return 0; }
+        return result ? 1 : 0;
       };
       const generateBatch = async (batch) => {
         if (batch.length === 1) return generateOne(batch[0]);
         if (batch.every((item) => item.point.exam_options && item.point.exam_options.length >= 2)) {
           let added = 0;
           for (const item of batch) {
-            if (await core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder)) added++;
+            const result = await core.generateCard(zoneId, item.point, examCardFromPoint(item.point, item.sortOrder), item.sortOrder);
+            if (result && result.skipped) skipped++;
+            else if (result) added++;
           }
           return added;
         }
@@ -660,7 +673,9 @@
         }));
         let added = 0;
         for (const entry of parsed) {
-          if (await core.generateCard(zoneId, entry.item.point, entry.card, entry.item.sortOrder)) added++;
+          const result = await core.generateCard(zoneId, entry.item.point, entry.card, entry.item.sortOrder);
+          if (result && result.skipped) skipped++;
+          else if (result) added++;
         }
         return added;
       };
@@ -679,11 +694,13 @@
             const batch = takeBatch();
             if (!batch) break;
           try {
-            generated += await generateBatch(batch);
+            const batchResult = await generateBatch(batch);
+            generated += (typeof batchResult === 'number' ? batchResult : 0);
           } catch (err) {
             for (const item of batch) {
               try {
-                if (await generateOne(item)) generated++;
+                const oneResult = await generateOne(item);
+                generated += (typeof oneResult === 'number' ? oneResult : 0);
               } catch (err2) {
                 failed.push({ title: item.point.title, error: err2.message || String(err2) });
               }
@@ -709,7 +726,7 @@
         profileRef.currentProfile = currentProfile;
       }
       await finished;
-      return { generated, failed, total: normalized.length };
+      return { generated, skipped, failed, total: normalized.length };
     }
 
     async function listModels(apiKey, baseUrl, timeoutMs) {

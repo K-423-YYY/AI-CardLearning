@@ -1,0 +1,139 @@
+/* === Mobile-specific Styles === */
+
+/* ---- Base Mobile Adjustments ---- */
+@media (max-width: 1023px) {
+  .desktop-only { display: none !important; }
+
+  .page {
+    padding: var(--space-md);
+  }
+
+  /* Compact stat grid */
+  .stat-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-sm);
+  }
+  .stat-card {
+    padding: var(--space-md);
+  }
+  .stat-num { font-size: var(--font-size-xl); }
+
+  /* Zone grid → single column */
+  .zone-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-sm);
+  }
+
+  /* File grid → single column */
+  .file-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Library grid → single column */
+  .library-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Modal full-width on mobile */
+  .modal-box {
+    max-width: 100%;
+    margin: 0 var(--space-md);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    max-height: 85vh;
+  }
+
+  /* Quiz card compact */
+  .quiz-card {
+    padding: var(--space-lg);
+  }
+  .quiz-question {
+    font-size: var(--font-size-base);
+  }
+  .quiz-option {
+    padding: var(--space-sm) var(--space-md);
+    font-size: var(--font-size-sm);
+  }
+
+  /* Fixed "Next" button on mobile quiz */
+  .btn-next.show {
+    position: fixed;
+    left: var(--space-md);
+    right: var(--space-md);
+    bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0));
+    width: auto;
+    z-index: 60;
+    box-shadow: var(--shadow-lg);
+    border-radius: var(--radius-full);
+  }
+
+  /* Chat on mobile */
+  .ai-chat-container {
+    height: calc(100dvh - var(--topbar-height) - 60px);
+  }
+  .chat-msg { max-width: 90%; }
+
+  /* Bottom padding for content behind tabbar */
+  .page-with-tabbar {
+    padding-bottom: calc(var(--tabbar-height) + var(--space-lg) + env(safe-area-inset-bottom, 0));
+  }
+
+  /* Settings single column */
+  .settings-grid { gap: var(--space-md); }
+  .settings-section { padding: var(--space-lg); }
+
+  /* Hero section compact */
+  .home-hero {
+    flex-direction: column;
+    padding: var(--space-lg);
+    gap: var(--space-lg);
+  }
+  .home-hero-right { flex-wrap: wrap; }
+}
+
+/* ---- Small Phone (< 400px) ---- */
+@media (max-width: 399px) {
+  .stat-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .quiz-option {
+    padding: var(--space-xs) var(--space-sm);
+  }
+  .library-item {
+    flex-direction: column;
+  }
+}
+
+/* ---- Tablet (600px - 1023px) ---- */
+@media (min-width: 600px) and (max-width: 1023px) {
+  .zone-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .file-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .library-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---- Desktop Refinements ---- */
+@media (min-width: 1024px) {
+  .mobile-only { display: none !important; }
+
+  .quiz-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+  }
+
+  /* FAB hidden on desktop (use sidebar + button instead) */
+  .fab { display: none; }
+
+  /* Desktop wider modals */
+  .modal-box { max-width: 480px; }
+
+  /* AI chat wider on desktop */
+  .ai-chat-container {
+    max-width: 900px;
+  }
+}

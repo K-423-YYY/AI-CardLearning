@@ -25,17 +25,12 @@ const Zones = {
         if (pinnedSection) pinnedSection.classList.add('hidden');
       } else {
         emptyEl.classList.add('hidden');
-        if (pinnedSection && pinnedList) {
-          if (pinned.length) {
-            pinnedSection.classList.remove('hidden');
-            pinnedList.innerHTML = pinned.map(z => this.zoneCardHtml(z)).join('');
-            this.bindZoneCards(pinnedList);
-          } else {
-            pinnedSection.classList.add('hidden');
-          }
-        }
-        listEl.innerHTML = normal.map(z => this.zoneCardHtml(z)).join('');
+        // All zones rendered together in a grid
+        const allHtml = list.map(z => this.zoneCardHtml(z)).join('');
+        listEl.innerHTML = `<div class="zone-grid">${allHtml}</div>`;
         this.bindZoneCards(listEl);
+        // Hide pinned section since pins are shown inline
+        if (pinnedSection) pinnedSection.classList.add('hidden');
       }
 
       document.getElementById('btn-new-zone').onclick = () => this.showCreateModal();
@@ -138,28 +133,25 @@ const Zones = {
 
   // Create zone modal
   showCreateModal() {
-    const modal = document.getElementById('modal');
-    const box = document.getElementById('modal-box');
     const now = new Date();
     const defaultName = `学习区 ${now.getMonth()+1}月${now.getDate()}日`;
 
-    box.innerHTML = `
+    Modal.show(`
       <h3>新建学习区</h3>
       <input type="text" id="zone-name-input" placeholder="${defaultName}" value="">
       <div class="modal-actions">
         <button class="btn btn-outline btn-sm" id="modal-cancel">取消</button>
         <button class="btn btn-primary btn-sm" id="modal-confirm">创建</button>
       </div>
-    `;
-    modal.classList.remove('hidden');
+    `);
 
     const input = document.getElementById('zone-name-input');
     input.focus();
 
-    document.getElementById('modal-cancel').onclick = () => modal.classList.add('hidden');
-    document.getElementById('modal-confirm').onclick = async () => {
+    Modal.bindCancel();
+    Modal.bindConfirm('#modal-confirm', async () => {
       const name = input.value.trim() || defaultName;
-      modal.classList.add('hidden');
+      Modal.close();
       try {
         await API.post('/api/zones', { name });
         Toast.show('学习区已创建', 'success');
@@ -167,9 +159,8 @@ const Zones = {
       } catch (e) {
         Toast.show(e.message, 'error');
       }
-    };
+    });
 
-    modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') document.getElementById('modal-confirm').click();
     });
@@ -235,71 +226,66 @@ const Zones = {
 
   zoneCardHtml(z) {
     return `
-      <div class="zone-card-wrap ${z.pinned ? 'pinned' : ''}" data-zone-id="${z.id}">
-        <div class="zone-actions">
-          <button class="zone-action-pin" data-act="pin" data-id="${z.id}">${z.pinned ? '取消置顶' : '置顶'}</button>
-          <button class="zone-action-delete" data-act="delete" data-id="${z.id}">删除</button>
+      <div class="zone-card" data-zone-id="${z.id}">
+        <div class="zone-card-name">${Utils.esc(z.name)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <span class="badge ${z.status === '已完成' ? 'badge-success' : 'badge-primary'}">${Utils.esc(z.status)}</span>
+          <span class="zone-card-meta" style="margin-top:0">卡片 ${z.card_count || 0}</span>
+          <span class="zone-card-meta" style="margin-top:0">已通关 ${z.success_count || 0}</span>
+          <span class="zone-card-meta" style="margin-top:0">${Utils.timeAgo(z.updated_at)}</span>
         </div>
-        <div class="zone-card">
-          <div class="zone-card-top">
-            <span class="zone-card-name">${Utils.esc(z.name)}</span>
-            <span class="zone-card-status ${z.status === '已完成' ? 'status-done' : 'status-active'}">${Utils.esc(z.status)}</span>
-          </div>
-          <div class="zone-card-meta">
-            <span>卡片 ${z.card_count || 0}</span>
-            <span>已通关 ${z.success_count || 0}</span>
-            <span>${Utils.timeAgo(z.updated_at)}</span>
-          </div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button class="btn btn-outline btn-sm" data-act="pin" data-id="${z.id}">${z.pinned ? '📌 取消置顶' : '📌 置顶'}</button>
+          <button class="btn btn-outline btn-sm" data-act="delete" data-id="${z.id}" style="color:var(--color-danger)">删除</button>
         </div>
       </div>
     `;
   },
 
   bindZoneCards(container) {
-    container.querySelectorAll('.zone-card-wrap').forEach(wrap => {
-      const zoneId = parseInt(wrap.dataset.zoneId, 10);
-      wrap.querySelector('.zone-card').addEventListener('click', () => {
+    container.querySelectorAll('.zone-card').forEach(card => {
+      const zoneId = parseInt(card.dataset.zoneId, 10);
+      card.addEventListener('click', (e) => {
+        // Don't navigate if clicking action buttons
+        if (e.target.closest('[data-act]')) return;
         this.currentZoneId = zoneId;
         App.navigate('zone', zoneId);
       });
-      wrap.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        wrap.classList.toggle('show-actions');
-      });
+      // Mobile: swipe right to reveal actions
       let touchStartX = null;
-      wrap.addEventListener('touchstart', (e) => {
+      card.addEventListener('touchstart', (e) => {
         touchStartX = e.touches[0].clientX;
       }, { passive: true });
-      wrap.addEventListener('touchend', (e) => {
+      card.addEventListener('touchend', (e) => {
         if (touchStartX === null) return;
         const dx = e.changedTouches[0].clientX - touchStartX;
-        if (dx > 40) wrap.classList.add('show-actions');
-        if (dx < -40) wrap.classList.remove('show-actions');
+        if (dx > 40) card.style.transform = 'translateX(80px)';
+        if (dx < -40) card.style.transform = '';
         touchStartX = null;
       });
-      document.addEventListener('click', (e) => {
-        if (!wrap.contains(e.target)) wrap.classList.remove('show-actions');
+      // Desktop: right-click for actions
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        card.style.transform = card.style.transform ? '' : 'translateX(80px)';
       });
-      wrap.querySelectorAll('[data-act]').forEach(btn => {
+      card.querySelectorAll('[data-act]').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
+          e.stopImmediatePropagation();
           const act = btn.dataset.act;
           if (act === 'pin') {
             try {
-              await API.post(`/api/zones/${zoneId}/pin`, { pinned: !wrap.classList.contains('pinned') });
+              const isPinned = card.querySelector('[data-act="pin"]').textContent.includes('取消');
+              await API.post(`/api/zones/${zoneId}/pin`, { pinned: !isPinned });
               this.renderHome();
-            } catch (err) {
-              Toast.show(err.message, 'error');
-            }
+            } catch (err) { Toast.show(err.message, 'error'); }
           } else if (act === 'delete') {
             if (!window.confirm('确定删除该学习区？学习区、卡片和进度会一并清空。')) return;
             try {
               await API.delete(`/api/zones/${zoneId}`);
               Toast.show('学习区已删除', 'success');
               this.renderHome();
-            } catch (err) {
-              Toast.show(err.message, 'error');
-            }
+            } catch (err) { Toast.show(err.message, 'error'); }
           }
         });
       });
@@ -996,12 +982,11 @@ const Zones = {
       const data = await API.post(`/api/zones/${zoneId}/generate`, payload);
       if (progressWrap) progressWrap.classList.add('hidden');
       const failedCount = (data.failed || []).length;
-      Toast.show(
-        failedCount > 0
-          ? `生成 ${data.generated} 张卡片，${failedCount} 个失败`
-          : `成功生成 ${data.generated} 张卡片`,
-        failedCount > 0 ? 'error' : 'success'
-      );
+      const skippedCount = data.skipped || 0;
+      let msg = `成功生成 ${data.generated} 张卡片`;
+      if (skippedCount > 0) msg += `，${skippedCount} 张因重复跳过`;
+      if (failedCount > 0) msg += `，${failedCount} 个失败`;
+      Toast.show(msg, failedCount > 0 ? 'error' : 'success');
       App.navigate('zone', zoneId);
     } catch (e) {
       if (progressWrap) progressWrap.classList.add('hidden');
@@ -1025,9 +1010,12 @@ const Zones = {
 
       document.getElementById('zone-name').textContent = zone.name;
       document.getElementById('zone-stats').innerHTML = `
-        <div class="stat-item"><div class="stat-num">${stats.total}</div><div class="stat-label">总卡片</div></div>
-        <div class="stat-item"><div class="stat-num">${stats.success}</div><div class="stat-label">已通关</div></div>
-        <div class="stat-item"><div class="stat-num">${files.length}</div><div class="stat-label">文件数</div></div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-num">${stats.total}</div><div class="stat-label">总卡片</div></div>
+          <div class="stat-card"><div class="stat-num">${stats.success}</div><div class="stat-label">已通关</div></div>
+          <div class="stat-card"><div class="stat-num">${files.length}</div><div class="stat-label">文件数</div></div>
+          <div class="stat-card"><div class="stat-num">${zone.completed_levels || 0}/${zone.level_count || 0}</div><div class="stat-label">关卡进度</div></div>
+        </div>
       `;
       this.renderStudyMode(zoneId, zone.study_mode || 'quiz');
       await this.loadProgress(zoneId);
@@ -1221,19 +1209,16 @@ const Zones = {
   // Level progress, check-in, review and per-zone daily limit
   askRebuildMode(zoneId, body) {
     return new Promise((resolve) => {
-      const modal = document.getElementById('modal');
-      const box = document.getElementById('modal-box');
-      box.innerHTML = `
+      Modal.show(`
         <h3>选择关卡处理方式</h3>
         <p style="font-size:0.9rem;color:#64748b;margin-bottom:12px;">修改排序或每日卡片数会生成新的关卡布局，请选择处理方式。</p>
         <div class="modal-actions" style="justify-content:center">
-          <button class="btn btn-outline btn-sm" id="modal-new-levels">新建后续关卡</button>
+          <button class="btn btn-outline btn-sm" id="modal-new-levels">新建后续关卡（保留已完成）</button>
           <button class="btn btn-primary btn-sm" id="modal-overwrite-levels">覆盖原有关卡</button>
         </div>
-      `;
-      modal.classList.remove('hidden');
+      `);
       document.getElementById('modal-new-levels').onclick = async () => {
-        modal.classList.add('hidden');
+        Modal.close();
         try {
           await API.put(`/api/zones/${zoneId}/settings`, { ...body, rebuild_mode: 'new' });
           Toast.show('已新建后续关卡', 'success');
@@ -1244,7 +1229,7 @@ const Zones = {
         }
       };
       document.getElementById('modal-overwrite-levels').onclick = async () => {
-        modal.classList.add('hidden');
+        Modal.close();
         try {
           await API.put(`/api/zones/${zoneId}/settings`, { ...body, rebuild_mode: 'overwrite' });
           Toast.show('已覆盖原有关卡', 'success');
