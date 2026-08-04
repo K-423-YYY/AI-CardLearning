@@ -103,7 +103,7 @@ async function readUploadFile(file) {
 
 let writeQueue = Promise.resolve();
 function withLock(fn) {
-  const run = writeQueue.then(fn, fn);
+  const run = writeQueue.catch(() => {}).then(() => fn());
   writeQueue = run.catch(() => {});
   return run;
 }
@@ -114,12 +114,11 @@ const LocalAPI = {
 
   async route(method, url, body) {
     const parts = parsePath(url);
-    try {
-      return await withLock(async () => {
-        if (parts[0] !== 'api') throw new Error('未知接口');
-        const p = parts.slice(1);
+    const doRoute = async () => {
+      if (parts[0] !== 'api') throw new Error('未知接口');
+      const p = parts.slice(1);
 
-        if (p[0] === 'me' && method === 'GET') {
+      if (p[0] === 'me' && method === 'GET') {
           const settings = await LocalCoreInstance.getSettings();
           return { user: { id: 1, email: 'local@user', nickname: settings.nickname }, settings };
         }
@@ -359,7 +358,11 @@ const LocalAPI = {
         }
 
         throw new Error('未知接口：' + url);
-      });
+    };
+
+    try {
+      if (method === 'GET') return await doRoute();
+      return await withLock(doRoute);
     } catch (err) {
       throw toApiError(err);
     }

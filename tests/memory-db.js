@@ -36,6 +36,10 @@ class MemoryDB {
     return (this.data[store] || []).filter(predicate).map((r) => ({ ...r }));
   }
 
+  async byIndex(store, indexName, value) {
+    return (this.data[store] || []).filter((r) => r[indexName] === value).map((r) => ({ ...r }));
+  }
+
   async nextId(store) {
     const rows = this.data[store] || [];
     return rows.reduce((max, r) => Math.max(max, typeof r.id === 'number' ? r.id : 0), 0) + 1;

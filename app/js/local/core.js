@@ -105,15 +105,18 @@
     return letters;
   }
 
+  // Deterministically shuffle options based on card id, wrong count, and date
   function shuffledOptions(card, wrongCount, dateStr) {
     const letters = ['A', 'B', 'C', 'D'];
-    const originals = shuffledLetters(card.id, wrongCount, dateStr);
     const options = [card.option_a, card.option_b, card.option_c, card.option_d];
+    const permuted = shuffledLetters(card.id, wrongCount, dateStr);
     const mapping = {};
-    originals.forEach((original, newIndex) => {
-      mapping[letters[newIndex]] = options[letters.indexOf(original)];
+    letters.forEach((newLetter, newIdx) => {
+      const oldLetter = permuted[newIdx];
+      const oldIdx = letters.indexOf(oldLetter);
+      mapping[newLetter] = options[oldIdx];
     });
-    const answer = letters[originals.indexOf(card.answer)];
+    const answer = letters[permuted.indexOf(card.answer)];
     return [mapping, answer];
   }
 
@@ -684,7 +687,7 @@
         : REVIEW_INTERVALS;
       for (const interval of intervals) {
         await db.put('review_schedule', {
-          id: `r:1:${cardId}:${dateAdd(dateStr, interval)}`,
+          id: `r:${cardId}:${dateAdd(dateStr, interval)}`,
           user_id: 1,
           zone_id: zoneId,
           card_id: cardId,
@@ -702,7 +705,7 @@
       );
       for (const row of rows) await db.delete('review_schedule', row.id);
       await db.put('review_schedule', {
-        id: `r:1:${cardId}:${dateAdd(dateStr, 1)}`,
+        id: `r:${cardId}:${dateAdd(dateStr, 1)}`,
         user_id: 1,
         zone_id: zoneId,
         card_id: cardId,
@@ -862,28 +865,27 @@
     }
 
     function toBase64(text) {
-      if (typeof btoa === 'function') return btoa(unescape(encodeURIComponent(text)));
-      return Buffer.from(text, 'utf8').toString('base64');
+      const bytes = new TextEncoder().encode(text);
+      let binary = '';
+      bytes.forEach((b) => { binary += String.fromCharCode(b); });
+      return btoa(binary);
     }
 
     function fromBase64(text) {
-      if (typeof atob === 'function') return decodeURIComponent(escape(atob(text)));
-      return Buffer.from(text, 'base64').toString('utf8');
+      const binary = atob(text);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
     }
 
     function toBinaryBase64(bytes) {
       let binary = '';
-      bytes.forEach((b) => {
-        binary += String.fromCharCode(b);
-      });
-      if (typeof btoa === 'function') return btoa(binary);
-      return Buffer.from(bytes).toString('base64');
+      bytes.forEach((b) => { binary += String.fromCharCode(b); });
+      return btoa(binary);
     }
 
     function fromBinaryBase64(text) {
-      let binary;
-      if (typeof atob === 'function') binary = atob(text);
-      else binary = Buffer.from(text, 'base64').toString('binary');
+      const binary = atob(text);
       const arr = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
       return arr;
@@ -1205,12 +1207,12 @@
       const fileId = file.id;
       const title = String(point.title || '').trim();
       const question = String(cardData.question || '').trim();
-      if (!title || !question) return false;
+      if (!title || !question) return { skipped: true, reason: 'missing_fields' };
       const dup = await db.where(
         'cards',
         (c) => c.file_id === fileId && c.title === title && c.question === question
       );
-      if (dup.length) return false;
+      if (dup.length) return { skipped: true, reason: 'duplicate' };
       const cardRow = await db.insert('cards', {
         file_id: fileId,
         title,
@@ -1581,7 +1583,7 @@
           }
           for (const oldReview of (data.review_schedule || []).filter((r) => r.zone_id === oldZone.id && cardMap.has(r.card_id))) {
             await db.put('review_schedule', {
-              id: `r:1:${cardMap.get(oldReview.card_id)}:${oldReview.review_date}`,
+              id: `r:${cardMap.get(oldReview.card_id)}:${oldReview.review_date}`,
               user_id: 1,
               zone_id: newZone.id,
               card_id: cardMap.get(oldReview.card_id),
@@ -1592,7 +1594,7 @@
           }
           for (const oldReview of (data.review_schedule || []).filter((r) => r.zone_id === oldZone.id && memoryMap.has(r.card_id))) {
             await db.put('review_schedule', {
-              id: `r:1:${memoryMap.get(oldReview.card_id)}:${oldReview.review_date}`,
+              id: `r:${memoryMap.get(oldReview.card_id)}:${oldReview.review_date}`,
               user_id: 1,
               zone_id: newZone.id,
               card_id: memoryMap.get(oldReview.card_id),
@@ -2125,8 +2127,9 @@
           level_count: zs && zs.level_count ? zs.level_count : null,
           updated_at: nowStr()
         });
-        if (body.sort_mode !== undefined || (body.daily_card_limit !== undefined && body.rebuild_mode !== undefined)) {
-          await rebuildZoneLevels(zoneId, null, body.rebuild_mode === 'new', await zoneStudyMode(zoneId));
+        if (body.sort_mode !== undefined || body.daily_card_limit !== undefined) {
+          const preserveCompleted = body.rebuild_mode !== 'overwrite';
+          await rebuildZoneLevels(zoneId, null, preserveCompleted, await zoneStudyMode(zoneId));
         }
         if (body.study_mode !== undefined && (await levelRows(zoneId, studyMode)).length === 0) {
           await rebuildZoneLevels(zoneId, null, false, studyMode);
@@ -2406,23 +2409,17 @@
             card.correct_streak = (card.correct_streak || 0) + 1;
             card.last_review_at = now;
             card.last_correct_at = now;
-            await db.put('cards', card);
-            if (task) {
-              task.status = 'done';
-              await db.put('daily_tasks', task);
+            if (task) { task.status = 'done'; await db.put('daily_tasks', task); }
+            if (!practice && card.status !== STATUS_DONE) {
+              card.status = STATUS_DONE; cardStatus = STATUS_DONE;
             }
+            await db.put('cards', card);
             if (!practice) {
-              if (card.status !== STATUS_DONE) {
-                card.status = STATUS_DONE;
-                cardStatus = STATUS_DONE;
-                await db.put('cards', card);
-              }
               await scheduleReviews(zoneId, cardId, dateStr, now);
               const remaining = (await cardsByZone(zoneId)).filter((c) => c.status !== STATUS_DONE).length;
               if (remaining === 0) {
                 const zone = await db.get('zones', zoneId);
-                zone.status = '已完成';
-                zone.updated_at = now;
+                zone.status = '已完成'; zone.updated_at = now;
                 await db.put('zones', zone);
               }
             }
@@ -2434,19 +2431,14 @@
             card.lapse_count = (card.lapse_count || 0) + 1;
             card.correct_streak = 0;
             card.last_wrong_at = now;
-            await db.put('cards', card);
             if (!practice) {
               const wrongToday = (await db.where(
-                'records',
-                (r) => r.card_id === cardId && r.user_id === 1 && r.is_correct === 0 && String(r.answered_at).slice(0, 10) === dateStr
+                'records', (r) => r.card_id === cardId && r.user_id === 1 && r.is_correct === 0 && String(r.answered_at).slice(0, 10) === dateStr
               )).length;
-              if (wrongToday >= 3) {
-                card.status = STATUS_REVIEW;
-                cardStatus = STATUS_REVIEW;
-                await db.put('cards', card);
-              }
+              if (wrongToday >= 3) { card.status = STATUS_REVIEW; cardStatus = STATUS_REVIEW; }
               await scheduleWrongRetry(zoneId, cardId, dateStr, now);
             }
+            await db.put('cards', card);
             if (task) {
               const others = (
                 await db.where(
@@ -2803,14 +2795,13 @@
           todayNewDone = pathLevel ? pathLevel.new_done : 0;
         }
         const checkedToday = !!(await db.get('checkins', `c:${zoneId}:${dateStr}`));
+        const MAX_STREAK_LOOKBACK = 365;
         let streak = 0;
-        for (let d = dateStr; ; ) {
+        for (let d = dateStr, i = 0; i < MAX_STREAK_LOOKBACK; i++) {
           if (await db.get('checkins', `c:${zoneId}:${d}`)) {
             streak++;
             d = dateAdd(d, -1);
-          } else {
-            break;
-          }
+          } else break;
         }
         const week = [];
         for (let i = 6; i >= 0; i--) {

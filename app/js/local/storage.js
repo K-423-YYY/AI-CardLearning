@@ -6,26 +6,26 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   const DB_NAME = 'ai-learn-local';
-  const DB_VERSION = 3;
+  const DB_VERSION = 4;
 
   const STORES = [
-    'settings',
-    'meta',
-    'keys',
-    'zones',
-    'files',
-    'cards',
-    'memory_cards',
-    'records',
-    'provider_configs',
-    'zone_settings',
-    'levels',
-    'level_cards',
-    'review_schedule',
-    'daily_tasks',
-    'checkins',
-    'ai_history'
+    'settings', 'meta', 'keys', 'zones', 'files', 'cards', 'memory_cards',
+    'records', 'provider_configs', 'zone_settings', 'levels', 'level_cards',
+    'review_schedule', 'daily_tasks', 'checkins', 'ai_history'
   ];
+
+  const INDEXES = {
+    files: [['zone_id', 'zone_id', { unique: false }]],
+    cards: [['file_id', 'file_id', { unique: false }]],
+    memory_cards: [['zone_id', 'zone_id', { unique: false }]],
+    records: [['card_id', 'card_id', { unique: false }]],
+    levels: [['zone_id', 'zone_id', { unique: false }]],
+    level_cards: [['zone_id', 'zone_id', { unique: false }]],
+    review_schedule: [['zone_id', 'zone_id', { unique: false }]],
+    daily_tasks: [['zone_id', 'zone_id', { unique: false }]],
+    checkins: [['zone_id', 'zone_id', { unique: false }]],
+    ai_history: [['zone_id', 'zone_id', { unique: false }]]
+  };
 
   function open() {
     return new Promise((resolve, reject) => {
@@ -36,10 +36,20 @@
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = event.target.result;
-        STORES.forEach((store) => {
-          if (!db.objectStoreNames.contains(store)) {
-            db.createObjectStore(store, { keyPath: 'id' });
+        STORES.forEach((storeName) => {
+          if (!db.objectStoreNames.contains(storeName)) {
+            db.createObjectStore(storeName, { keyPath: 'id' });
           }
+        });
+        const tx = event.target.transaction;
+        Object.entries(INDEXES).forEach(([storeName, indexDefs]) => {
+          if (!db.objectStoreNames.contains(storeName)) return;
+          const store = tx.objectStore(storeName);
+          indexDefs.forEach(([indexName, keyPath, opts]) => {
+            if (!store.indexNames.contains(indexName)) {
+              store.createIndex(indexName, keyPath, opts);
+            }
+          });
         });
       };
       req.onsuccess = () => resolve(req.result);
@@ -106,17 +116,15 @@
     return withStore(storeName, 'readonly', (store) => requestToPromise(store.count()));
   }
 
+  function byIndex(storeName, indexName, value) {
+    return withStore(storeName, 'readonly', (store) => {
+      const index = store.index(indexName);
+      return requestToPromise(index.getAll(value));
+    });
+  }
+
   return {
-    DB_NAME,
-    DB_VERSION,
-    STORES,
-    open,
-    getDb,
-    all,
-    get,
-    put,
-    delete: remove,
-    clear,
-    count
+    DB_NAME, DB_VERSION, STORES, open, getDb,
+    all, get, put, delete: remove, clear, count, byIndex
   };
 });

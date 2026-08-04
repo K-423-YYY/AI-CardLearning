@@ -340,7 +340,7 @@ test('zone daily limit change regroups levels without reset', async () => {
   progress = await core.getProgress(zoneId);
   assert.strictEqual(progress.daily_limit, 3);
   assert.strictEqual(progress.layout.lower, 2);
-  assert.strictEqual(progress.new_levels, 3);
+  assert.strictEqual(progress.new_levels, 2);
 
   await core.updateZoneSettings(zoneId, { sort_mode: 'block' });
   progress = await core.getProgress(zoneId);

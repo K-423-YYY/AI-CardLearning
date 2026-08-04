@@ -28,15 +28,13 @@
     return rows.filter(predicate);
   }
 
+  async function byIndex(storeName, indexName, value) {
+    return storage.byIndex(storeName, indexName, value);
+  }
+
   return {
-    all: storage.all,
-    get: storage.get,
-    put: storage.put,
-    delete: storage.delete,
-    clear: storage.clear,
-    count: storage.count,
-    where,
-    nextId,
-    insert
+    all: storage.all, get: storage.get, put: storage.put,
+    delete: storage.delete, clear: storage.clear, count: storage.count,
+    where, byIndex, nextId, insert
   };
 });
