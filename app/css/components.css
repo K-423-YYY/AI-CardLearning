@@ -387,8 +387,8 @@
 .page-center { display: flex; justify-content: center; align-items: center; min-height: 60vh; }
 .main-content { flex: 1; padding: var(--space-lg); }
 
-/* Topbar (mobile pages still use these) */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-lg); height: var(--topbar-height); background: var(--color-bg-white); border-bottom: 1px solid var(--color-border); position: sticky; top: 0; z-index: var(--z-topbar); }
+/* Topbar — compact, for pages that still have their own topbar */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-lg); height: 44px; background: var(--color-bg-white); border-bottom: 1px solid var(--color-border); }
 .topbar-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-back { font-size: 20px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); }
 

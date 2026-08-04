@@ -197,9 +197,14 @@ const App = {
     // Show/hide tabbar
     const tabbar = document.getElementById('tabbar');
     const fab = document.getElementById('fab');
-    const showTabbar = ['learn', 'cards', 'sync', 'settings'].includes(activeTab || '');
+    // Hide tabbar on pages with bottom buttons or full-screen content
+    const hideTabbarRoutes = ['learn', 'level', 'wrong-practice', 'ai', 'upload'];
+    const showTabbar = (['learn', 'cards', 'sync', 'settings'].includes(activeTab || '')) && !hideTabbarRoutes.includes(r.route);
     if (tabbar) tabbar.classList.toggle('hidden', !showTabbar);
     if (fab) fab.classList.toggle('hidden', r.route !== 'home');
+    // Hide mobile back button on home page
+    const mobileBack = document.getElementById('btn-mobile-back');
+    if (mobileBack) mobileBack.style.visibility = r.route === 'home' ? 'hidden' : 'visible';
     // Page class for tabbar spacing
     const app = document.getElementById('app');
     if (app) app.classList.toggle('page-with-tabbar', showTabbar);
