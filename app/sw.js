@@ -9,7 +9,6 @@ const PRECACHE = [
   './css/components.css?v=35',
   './css/pages.css?v=35',
   './css/mobile.css?v=35',
-  './css/style.css?v=33',
   './vendor/jszip.min.js',
   './js/local/docx.js?v=33',
   './vendor/pdf.mjs',
