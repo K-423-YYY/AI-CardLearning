@@ -109,23 +109,26 @@ const App = {
 
   updateDesktopShell(r) {
     const titleEl = document.getElementById('desktop-title');
-    const subEl = document.getElementById('desktop-subtitle');
-    if (!titleEl) return;
-    const titles = {
-      home: ['学习总览', '管理学习区，规划每日闯关'],
-      zone: ['学习区详情', '上传资料、生成卡片、查看闯关路径'],
-      upload: ['上传文件', '支持文本、Markdown、C++、头文件、Python、PDF 文档'],
-      ai: ['AI 趋势分析', '自动提取知识点并生成知识卡片'],
-      cards: ['知识卡片', '浏览、复习或删除全部卡片'],
-      level: ['关卡学习', '完成本关任务'],
-      learn: ['今日闯关', '新学卡片 + 到期复习'],
-      wrong: ['错题集', '集中重练答错的卡片'],
-      'wrong-practice': ['错题练习', '独立复习模式'],
-      settings: ['设置', '个人偏好、AI 服务商与本地备份']
-    };
-    const [title, sub] = titles[r.route] || ['AI 闯关学习', '本地优先的学习工具'];
-    titleEl.textContent = title;
-    subEl.textContent = sub;
+    if (titleEl) {
+      const titles = {
+        home: ['学习总览', '管理学习区，规划每日闯关'],
+        zone: ['学习区详情', '上传资料、生成卡片、查看闯关路径'],
+        upload: ['上传文件', '支持文本、Markdown、C++、头文件、Python、PDF 文档'],
+        ai: ['AI 趋势分析', '自动提取知识点并生成知识卡片'],
+        cards: ['知识卡片', '浏览、复习或删除全部卡片'],
+        level: ['关卡学习', '完成本关任务'],
+        learn: ['今日闯关', '新学卡片 + 到期复习'],
+        wrong: ['错题集', '集中重练答错的卡片'],
+        'wrong-practice': ['错题练习', '独立复习模式'],
+        settings: ['设置', '个人偏好、AI 服务商与本地备份'],
+        sync: ['云盘同步', '通过 WebDAV 在多设备间同步学习数据'],
+        'ai-chat': ['对话式 AI 分析', '四阶段独立对话 + 微调重新生成']
+      };
+      const [title, sub] = titles[r.route] || ['AI 闯关学习', '本地优先的学习工具'];
+      titleEl.textContent = title;
+      const subEl = document.getElementById('desktop-subtitle');
+      if (subEl) subEl.textContent = sub || '';
+    }
     document.querySelectorAll('.sidebar-item').forEach((item) => {
       const active = (r.route === 'home' && item.dataset.nav === 'home') ||
         (r.route === 'settings' && item.dataset.nav === 'settings');
