@@ -16,6 +16,7 @@
   "build": {
     "appId": "com.ailearn.local",
     "productName": "AI闯关学习",
+    "asar": false,
     "files": [
       "main.js",
       "preload.js",
