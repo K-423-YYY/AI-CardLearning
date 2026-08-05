@@ -33,9 +33,22 @@ function createWindow() {
       nodeIntegration: false
     }
   });
-  const packagedApp = path.join(__dirname, 'app', 'index.html');
-  const repoApp = path.join(__dirname, '..', 'app', 'index.html');
-  mainWindow.loadFile(fs.existsSync(packagedApp) ? packagedApp : repoApp);
+  // Try multiple paths to find the app, ordered by priority
+  const candidates = [
+    path.join(__dirname, 'app', 'index.html'),      // asar: app/ folder alongside main.js
+    path.join(__dirname, 'index.html'),              // flat: index.html next to main.js
+    path.join(__dirname, '..', 'app', 'index.html'), // dev: ../app/ from desktop/
+  ];
+  let appPath = candidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
+  if (!appPath) appPath = candidates[0]; // fallback, let Electron show the error
+  mainWindow.loadFile(appPath).catch((err) => {
+    console.error('Failed to load app:', err.message, 'tried:', candidates);
+    // Show error in window
+    mainWindow.loadURL('data:text/html,<h2>启动失败</h2><p>' + encodeURIComponent(err.message) + '</p>');
+  });
+  mainWindow.webContents.on('did-fail-load', (event, code, desc, url) => {
+    console.error('Page load failed:', code, desc, url);
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
