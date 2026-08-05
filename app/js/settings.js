@@ -44,6 +44,7 @@ const Settings = {
       this.renderBackupDir();
       this.renderProviderList(provData.providers || []);
       this.renderBackupInfo();
+      this.renderSyncButton();
     } catch (e) {
       Toast.show(e.message, 'error');
     }
@@ -860,5 +861,16 @@ const Settings = {
       }
     };
     modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
-  }
+  },
+
+  renderSyncButton() {
+    const main = document.querySelector('#app .main-content');
+    if (!main) return;
+    const div = document.createElement('div');
+    div.className = 'settings-section';
+    div.style.marginTop = '16px';
+    div.innerHTML = '<h3>☁ 云盘同步</h3><p class="form-hint">通过 WebDAV 协议在多设备间同步学习数据，支持坚果云、NextCloud 等。</p><button class="btn btn-outline btn-block" id="btn-open-sync" style="margin-top:12px">打开云同步设置</button>';
+    main.appendChild(div);
+    document.getElementById('btn-open-sync').onclick = () => App.navigate('sync');
+  },
 };

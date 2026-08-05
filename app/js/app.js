@@ -84,8 +84,18 @@ const App = {
       case 'wrong-practice':
         Cards.renderWrongPractice(r.args[0]);
         break;
+      case 'sync':
+        SyncSettings.render();
+        break;
+      case 'ai-chat':
+        AIChat.render(r.args[0]);
+        break;
       case 'settings':
         r.args.length ? Settings.renderDetail(r.args[0]) : Settings.render();
+        break;
+      default:
+        console.warn('未知路由: ' + r.route);
+        Zones.renderHome();
         break;
     }
     this.updateDesktopShell(r);
@@ -162,6 +172,11 @@ const App = {
     } else if (hash.startsWith('wrong-practice/')) {
       const zoneId = parseInt(hash.split('/')[1], 10);
       if (zoneId) target = { route: 'wrong-practice', args: [zoneId] };
+    } else if (hash === 'sync') {
+      target = { route: 'sync', args: [] };
+    } else if (hash.startsWith('ai-chat/')) {
+      const zoneId = parseInt(hash.split('/')[1], 10);
+      if (zoneId) target = { route: 'ai-chat', args: [zoneId] };
     } else if (hash === 'settings') {
       target = { route: 'settings', args: [] };
     } else if (hash.startsWith('settings/')) {
@@ -187,6 +202,8 @@ const App = {
       } else if (h.startsWith('learn/')) this.navigate('learn', parseInt(h.split('/')[1], 10));
       else if (h.startsWith('wrong/')) this.navigate('wrong', parseInt(h.split('/')[1], 10));
       else if (h.startsWith('wrong-practice/')) this.navigate('wrong-practice', parseInt(h.split('/')[1], 10));
+      else if (h === 'sync') this.navigate('sync');
+      else if (h.startsWith('ai-chat/')) this.navigate('ai-chat', parseInt(h.split('/')[1], 10));
     });
   },
 

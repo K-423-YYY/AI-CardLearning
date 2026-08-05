@@ -374,6 +374,12 @@ const Zones = {
     const fileIds = Array.from(document.querySelectorAll('.ai-file-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
     await this.renderSpeedSelector(zoneId, fileIds);
     await this.loadAIHistory(zoneId);
+    // Add "Dialogue mode" button
+    const chatBtn = document.createElement('div');
+    chatBtn.innerHTML = '<button class="btn btn-outline btn-block" id="btn-ai-chat" style="margin-top:10px">💬 切换到对话式分析</button>';
+    document.querySelector('.ai-actions')?.appendChild(chatBtn.firstElementChild);
+    const btnChat = document.getElementById('btn-ai-chat');
+    if (btnChat) btnChat.onclick = () => App.navigate('ai-chat', zoneId);
   },
 
   async loadAIHistory(zoneId) {
@@ -1262,19 +1268,41 @@ const Zones = {
       const p = await API.get(`/api/zones/${zoneId}/progress`);
       const el = document.getElementById('zone-progress');
       const pct = p.total_cards > 0 ? Math.round((p.done_cards / p.total_cards) * 100) : 0;
-      const weekHtml = (p.week || []).map(w => `
-        <span class="week-dot ${w.checked ? 'checked' : ''}" title="${w.date}"></span>
-      `).join('');
-      const cols = 5;
+      const weekHtml = (p.week || []).map(w => `<span class="week-dot ${w.checked ? 'checked' : ''}" title="${w.date}"></span>`).join('');
       const levels = p.levels || [];
       const sortMode = p.sort_mode || 'easy_to_hard';
+      const layout = p.layout || { lower: 0, upper: 0, recommended: 0, selected: null };
+      const hasLayout = p.total_cards > 0 && layout.upper > 0;
+
+      // --- Project management ---
+      let projects = this._loadProjects(zoneId);
+      if (!projects.length && levels.length) {
+        // Auto-create default project from all existing levels
+        const defaultName = '关卡项目 1';
+        const pStart = levels[0] ? levels[0].level_no : 1;
+        const pEnd = levels[levels.length - 1] ? levels[levels.length - 1].level_no : pStart;
+        projects = [{ name: defaultName, level_start: pStart, level_end: pEnd, id: 'p1' }];
+        this._saveProjects(zoneId, projects);
+      }
+      let activeProj = projects.length ? projects[0] : null;
+      const activeProjId = this._activeProjectId || (activeProj ? activeProj.id : null);
+      if (activeProjId) {
+        const found = projects.find((pr) => pr.id === activeProjId);
+        if (found) activeProj = found;
+      }
+
+      // --- Filter levels for active project ---
+      const projLevels = activeProj
+        ? levels.filter((lv) => lv.level_no >= activeProj.level_start && lv.level_no <= activeProj.level_end)
+        : levels;
+
+      // --- Build Duolingo path for active project ---
+      const cols = 5;
       const items = [];
       let prevBlock = null;
-      levels.forEach(lv => {
+      projLevels.forEach((lv) => {
         const block = sortMode === 'block' ? (lv.block_name || lv.name || '') : '';
-        if (sortMode === 'block' && prevBlock !== null && block !== prevBlock) {
-          items.push({ type: 'divider', block });
-        }
+        if (sortMode === 'block' && prevBlock !== null && block !== prevBlock) { items.push({ type: 'divider', block }); }
         items.push({ type: 'level', lv });
         prevBlock = block;
       });
@@ -1283,30 +1311,26 @@ const Zones = {
       const flushRow = () => {
         if (!currentRow.length) return;
         const reversed = pathRows.length % 2 === 1;
-        pathRows.push(`<div class="path-row ${reversed ? 'reverse' : ''}">${currentRow.map(lv => this.nodeHtml(lv, p.current_level)).join('')}</div>`);
+        pathRows.push(`<div class="path-row ${reversed ? 'reverse' : ''}">${currentRow.map((lv) => this.nodeHtml(lv, p.current_level)).join('')}</div>`);
         currentRow = [];
       };
-      items.forEach(item => {
-        if (item.type === 'divider') {
-          flushRow();
-          pathRows.push(`<div class="path-block-divider"><span>${Utils.esc(item.block)}</span></div>`);
-        } else {
-          currentRow.push(item.lv);
-          if (currentRow.length >= cols) flushRow();
-        }
+      items.forEach((item) => {
+        if (item.type === 'divider') { flushRow(); pathRows.push(`<div class="path-block-divider"><span>${Utils.esc(item.block)}</span></div>`); }
+        else { currentRow.push(item.lv); if (currentRow.length >= cols) flushRow(); }
       });
       flushRow();
       const pathHtml = pathRows.join('');
-      const layout = p.layout || { lower: 0, upper: 0, recommended: 0, selected: null };
-      const hasLayout = p.total_cards > 0 && layout.upper > 0;
-      const selectedLevelCount = layout.selected >= layout.lower && layout.selected <= layout.upper
-        ? layout.selected
-        : layout.recommended;
+
+      const projStats = activeProj ? { done: projLevels.filter((lv) => lv.status === '已通关').length, total: projLevels.length,
+        current: projLevels.find((lv) => lv.level_no === p.current_level) ? p.current_level : (projLevels[0] ? projLevels[0].level_no : 0) } : { done: 0, total: 0, current: 0 };
+
       const newProgress = p.today_new_total > 0 ? `${p.today_new_done}/${p.today_new_total}` : '—';
+
+      // --- Render: left tabs + right path ---
       el.innerHTML = `
         <div class="level-card">
           <div class="level-head">
-            <span class="level-title">第 ${p.current_level}/${p.total_levels} 关 · 已通关 ${p.completed_levels}</span>
+            <span class="level-title">${Utils.esc(activeProj ? activeProj.name : '全部关卡')} · 已通关 ${projStats.done}/${projStats.total}</span>
             <span class="streak">🔥 ${p.streak} 天</span>
           </div>
           <div class="level-bar-bg"><div class="level-bar-fill" style="width:${pct}%"></div></div>
@@ -1315,12 +1339,27 @@ const Zones = {
             <span>今日新卡 ${newProgress}</span>
             <span>待复习 ${p.review_today || 0}</span>
           </div>
-          <div class="level-path-wrap">
-            <svg class="path-svg"></svg>
-            <div class="path-rows">${pathHtml}</div>
-          </div>
           <div class="week-row">${weekHtml}</div>
-          <div class="sort-mode-row">
+          <div style="display:flex;gap:12px;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">
+            <!-- Left: project tabs -->
+            <div style="width:140px;flex-shrink:0;display:flex;flex-direction:column;gap:4px" id="project-tabs">
+              ${projects.map((pr) => {
+                const prLvls = levels.filter((lv) => lv.level_no >= pr.level_start && lv.level_no <= pr.level_end);
+                const prDone = prLvls.filter((lv) => lv.status === '已通关').length;
+                const isActive = activeProj && pr.id === activeProj.id;
+                return `<button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline'}" data-proj-id="${pr.id}" style="text-align:left;justify-content:flex-start;height:auto;padding:8px 10px;font-size:13px" title="${Utils.esc(pr.name)}">${Utils.esc(pr.name)}<span style="margin-left:auto;font-size:10px;opacity:0.7">${prDone}/${prLvls.length}</span></button>`;
+              }).join('')}
+              <button class="btn btn-outline btn-sm" id="btn-new-project" style="margin-top:4px;font-size:12px">+ 新建</button>
+            </div>
+            <!-- Right: Duolingo path -->
+            <div style="flex:1;min-width:0">
+              <div class="level-path-wrap">
+                <svg class="path-svg"></svg>
+                <div class="path-rows">${pathHtml}</div>
+              </div>
+            </div>
+          </div>
+          <div class="sort-mode-row" style="margin-top:10px">
             <label>学习排序</label>
             <div class="sort-mode-control">
               <button class="sort-mode-btn ${sortMode === 'easy_to_hard' ? 'active' : ''}" data-mode="easy_to_hard">由易到难</button>
@@ -1330,7 +1369,7 @@ const Zones = {
           ${hasLayout ? `
             <div class="layout-row">
               <label for="zone-level-count">关卡数量</label>
-              <input type="number" id="zone-level-count" min="${layout.lower}" max="${layout.upper}" value="${selectedLevelCount || ''}" placeholder="${layout.recommended}">
+              <input type="number" id="zone-level-count" min="${layout.lower}" max="${layout.upper}" value="${layout.selected || layout.recommended || ''}" placeholder="${layout.recommended}">
               <button class="btn btn-primary btn-sm" id="btn-save-level-count">保存</button>
             </div>
             <div class="layout-hint">AI 建议 ${layout.recommended} 关，可选 ${layout.lower} - ${layout.upper}</div>
@@ -1342,13 +1381,30 @@ const Zones = {
           </div>
         </div>
       `;
+
       this.drawPath(el);
-      el.querySelectorAll('.level-node-wrap:not(.locked)').forEach(node => {
-        node.addEventListener('click', () => {
-          App.navigate('level', zoneId, parseInt(node.dataset.level, 10));
+
+      // --- Bind events ---
+      el.querySelectorAll('.level-node-wrap:not(.locked)').forEach((node) => {
+        node.addEventListener('click', () => { App.navigate('level', zoneId, parseInt(node.dataset.level, 10)); });
+      });
+
+      // Project tab switching
+      el.querySelectorAll('[data-proj-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this._activeProjectId = btn.dataset.projId;
+          this.loadProgress(zoneId);
         });
       });
-      el.querySelectorAll('.sort-mode-btn').forEach(btn => {
+
+      // New project button
+      const newProjBtn = document.getElementById('btn-new-project');
+      if (newProjBtn) {
+        newProjBtn.onclick = () => this._createProject(zoneId, projects, levels);
+      }
+
+      // Sort mode change
+      el.querySelectorAll('.sort-mode-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
           const mode = btn.dataset.mode;
           if (mode === p.sort_mode) return;
@@ -1356,34 +1412,61 @@ const Zones = {
           if (ok) await this.loadProgress(zoneId);
         });
       });
-      document.getElementById('btn-save-zone-limit').onclick = async () => {
-        const limit = parseInt(document.getElementById('zone-daily-limit').value, 10);
-        if (!limit || limit < 1 || limit > 100) {
-          Toast.show('请输入 1-100 的卡片数', 'error');
-          return;
-        }
-        const ok = await this.askRebuildMode(zoneId, { daily_card_limit: limit });
-        if (ok) await this.loadProgress(zoneId);
-      };
-      if (hasLayout) {
-        document.getElementById('btn-save-level-count').onclick = async () => {
-          const n = parseInt(document.getElementById('zone-level-count').value, 10);
-          if (!n || n < layout.lower || n > layout.upper) {
-            Toast.show(`关卡数需在 ${layout.lower} 到 ${layout.upper} 之间`, 'error');
-            return;
-          }
-          try {
-            await API.put(`/api/zones/${zoneId}/levels/layout`, { level_count: n });
-            Toast.show('关卡排版已更新', 'success');
-            await this.loadProgress(zoneId);
-          } catch (e) {
-            Toast.show(e.message, 'error');
-          }
+
+      // Daily limit change
+      const saveLimitBtn = document.getElementById('btn-save-zone-limit');
+      if (saveLimitBtn) {
+        saveLimitBtn.onclick = async () => {
+          const limit = parseInt(document.getElementById('zone-daily-limit').value, 10);
+          if (!limit || limit < 1 || limit > 100) { Toast.show('请输入 1-100 的卡片数', 'error'); return; }
+          const ok = await this.askRebuildMode(zoneId, { daily_card_limit: limit });
+          if (ok) await this.loadProgress(zoneId);
         };
       }
-    } catch (e) {
-      // progress is optional; zone detail still works
+
+      // Level count change
+      if (hasLayout) {
+        const saveCountBtn = document.getElementById('btn-save-level-count');
+        if (saveCountBtn) {
+          saveCountBtn.onclick = async () => {
+            const n = parseInt(document.getElementById('zone-level-count').value, 10);
+            if (!n || n < layout.lower || n > layout.upper) { Toast.show(`关卡数需在 ${layout.lower} 到 ${layout.upper} 之间`, 'error'); return; }
+            try {
+              await API.put(`/api/zones/${zoneId}/levels/layout`, { level_count: n });
+              Toast.show('关卡排版已更新', 'success');
+              await this.loadProgress(zoneId);
+            } catch (e) { Toast.show(e.message, 'error'); }
+          };
+        }
+      }
+    } catch (e) { /* progress is optional */ }
+  },
+
+  // --- Project helpers ---
+  _loadProjects(zoneId) {
+    try { return JSON.parse(localStorage.getItem('ai-projects-' + zoneId) || '[]'); } catch (e) { return []; }
+  },
+  _saveProjects(zoneId, projects) {
+    try { localStorage.setItem('ai-projects-' + zoneId, JSON.stringify(projects)); } catch (e) {}
+  },
+  _createProject(zoneId, projects, levels) {
+    const idx = projects.length + 1;
+    const defaultName = `关卡项目 ${idx}`;
+    // New project starts after the last level of the last project
+    const lastEnd = projects.length ? Math.max(...projects.map((p) => p.level_end)) : (levels.length ? levels[levels.length - 1].level_no : 0);
+    const newStart = lastEnd + 1;
+    const newEnd = newStart; // initially empty, user can add levels via settings changes
+    const newProj = { id: 'p' + Date.now(), name: defaultName, level_start: newStart, level_end: newEnd };
+    projects.push(newProj);
+    this._saveProjects(zoneId, projects);
+    // Prompt user to customize name
+    const name = prompt('请输入项目名称：', defaultName);
+    if (name !== null && name.trim()) {
+      newProj.name = name.trim();
+      this._saveProjects(zoneId, projects);
     }
+    this._activeProjectId = newProj.id;
+    this.loadProgress(zoneId);
   },
 
   nodeHtml(lv, currentLevel) {
